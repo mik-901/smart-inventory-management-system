@@ -1,0 +1,24 @@
+{
+  "name": "smart-inventory-management-system",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Enterprise-grade full-stack inventory management system with Next.js, Express, PostgreSQL/Supabase, realtime events, and premium SaaS UI.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:web": "npm run dev -w @smart-inventory/web",
+    "dev:api": "npm run dev -w @smart-inventory/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "latest"
+  },
+  "engines": {
+    "node": ">=20.15.0"
+  }
+}

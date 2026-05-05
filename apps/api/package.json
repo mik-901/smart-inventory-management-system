@@ -1,0 +1,39 @@
+{
+  "name": "@smart-inventory/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clerk/backend": "latest",
+    "cors": "latest",
+    "csv-stringify": "latest",
+    "dotenv": "latest",
+    "exceljs": "latest",
+    "express": "latest",
+    "helmet": "latest",
+    "jose": "latest",
+    "morgan": "latest",
+    "multer": "latest",
+    "pdfkit": "latest",
+    "pg": "latest",
+    "socket.io": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/morgan": "latest",
+    "@types/multer": "latest",
+    "@types/node": "latest",
+    "@types/pdfkit": "latest",
+    "@types/pg": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
