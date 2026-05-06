@@ -8,13 +8,96 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { reportRows } from "@/lib/demo-data";
-import { reportExportUrl } from "@/lib/api";
+import { reportRows, products, inventory, orders, warehouses } from "@/lib/demo-data";
+import { csvDownload } from "@/lib/utils";
+
+/** Build a CSV-friendly row set for each report category */
+function getReportData(report: string): Record<string, string | number | null | undefined>[] {
+  switch (report) {
+    case "Stock valuation":
+      return products.map((p) => ({
+        SKU: p.sku,
+        Name: p.name,
+        Category: p.category,
+        Stock: p.stock,
+        CostPrice: p.costPrice,
+        TotalValue: p.stock * p.costPrice
+      }));
+    case "Movement history":
+      return inventory.map((i) => ({
+        SKU: i.sku,
+        Product: i.product,
+        Warehouse: i.warehouse,
+        Available: i.available,
+        Reserved: i.reserved,
+        Damaged: i.damaged,
+        LastSync: i.lastSync
+      }));
+    case "Dead stock report":
+      return products
+        .filter((p) => p.stock <= p.reorderLevel)
+        .map((p) => ({
+          SKU: p.sku,
+          Name: p.name,
+          Stock: p.stock,
+          ReorderLevel: p.reorderLevel,
+          CostPrice: p.costPrice
+        }));
+    case "Aging report":
+      return products.map((p) => ({
+        SKU: p.sku,
+        Name: p.name,
+        Category: p.category,
+        Stock: p.stock,
+        Status: p.status
+      }));
+    case "ABC analysis":
+      return products.map((p) => ({
+        SKU: p.sku,
+        Name: p.name,
+        Revenue: p.price * p.stock,
+        CostPrice: p.costPrice,
+        Class: p.price * p.stock > 500000 ? "A" : p.price * p.stock > 100000 ? "B" : "C"
+      }));
+    case "Warehouse wise report":
+      return warehouses.map((w) => ({
+        Code: w.code,
+        Name: w.name,
+        City: w.city,
+        Manager: w.manager,
+        Capacity: w.capacityPct
+      }));
+    case "Supplier wise report":
+      return products.map((p) => ({
+        Supplier: p.supplier,
+        SKU: p.sku,
+        Name: p.name,
+        Stock: p.stock,
+        CostPrice: p.costPrice
+      }));
+    default:
+      return reportRows.map((r) => ({ ...r }));
+  }
+}
 
 export default function ReportsPage() {
-  const openExport = (report: string, format: "csv" | "pdf" | "xlsx") => {
-    window.open(reportExportUrl(report, format), "_blank", "noopener,noreferrer");
-    toast.success(`${format.toUpperCase()} export requested`);
+  const downloadCSV = (report: string) => {
+    const data = getReportData(report);
+    const filename = report.toLowerCase().replace(/\s+/g, "-") + ".csv";
+    csvDownload(filename, data);
+    toast.success(`${report} CSV downloaded`);
+  };
+
+  const downloadAsPDF = (report: string) => {
+    // Generate a printable HTML page that the user can "Save as PDF"
+    const data = getReportData(report);
+    if (data.length === 0) return toast.error("No data for this report");
+    const headers = Object.keys(data[0]);
+    const rows = data.map((r) => `<tr>${headers.map((h) => `<td style="padding:4px 8px;border:1px solid #ddd">${r[h] ?? ""}</td>`).join("")}</tr>`).join("");
+    const html = `<html><head><title>${report}</title><style>body{font-family:system-ui,sans-serif;margin:20px}table{border-collapse:collapse;width:100%}th{background:#f5f5f5;padding:6px 8px;border:1px solid #ddd;text-align:left}</style></head><body><h1>${report}</h1><p>Generated: ${new Date().toLocaleString()}</p><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></body></html>`;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.print(); }
+    toast.success(`${report} PDF opened — use Ctrl+P to save`);
   };
 
   return (
@@ -66,13 +149,13 @@ export default function ReportsPage() {
                   <TableCell>{report.format}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openExport(report.report, "pdf")}>
+                      <Button variant="outline" size="sm" onClick={() => downloadAsPDF(report.report)}>
                         PDF
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => openExport(report.report, "xlsx")}>
+                      <Button variant="outline" size="sm" onClick={() => downloadCSV(report.report)}>
                         Excel
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => openExport(report.report, "csv")}>
+                      <Button variant="outline" size="sm" onClick={() => downloadCSV(report.report)}>
                         <Download />
                         CSV
                       </Button>

@@ -17,6 +17,7 @@ import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { returnsRouter } from "./modules/returns/returns.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
 import { warehousesRouter } from "./modules/warehouses/warehouses.routes.js";
+import { authRouter } from "./modules/auth/auth.routes.js";
 
 export function createApp() {
   const app = express();
@@ -41,6 +42,7 @@ export function createApp() {
     });
   });
 
+  app.use("/auth", authRouter);
   app.use("/api", authenticate);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/products", productsRouter);

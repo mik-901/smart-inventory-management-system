@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Boxes, ChevronLeft, LogOut, Menu, Moon, Search, Sun, UserRound, X } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -11,34 +11,72 @@ import { NotificationCenter } from "@/components/layout/notification-center";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { canAccess, getSession, logout, type DemoSession } from "@/lib/auth";
+import { useAuth, canAccess } from "@/lib/auth-context";
 import { navigationItems } from "@/lib/navigation";
+import { products, inventory, orders, warehouses } from "@/lib/demo-data";
 import { cn } from "@/lib/utils";
+
+type SearchResult = { label: string; sub: string; href: string; type: string };
+
+function buildSearchIndex(): SearchResult[] {
+  const results: SearchResult[] = [];
+  products.forEach((p) => {
+    results.push({ label: p.name, sub: p.sku, href: "/products", type: "Product" });
+    results.push({ label: p.sku, sub: p.name, href: "/products", type: "SKU" });
+    if (p.barcode) results.push({ label: p.barcode, sub: p.name, href: "/products", type: "Barcode" });
+  });
+  orders.forEach((o) => results.push({ label: o.number, sub: `${o.type} · ${o.party}`, href: "/orders", type: "Order" }));
+  warehouses.forEach((w) => results.push({ label: w.name, sub: `${w.code} · ${w.city}`, href: "/warehouses", type: "Warehouse" }));
+  inventory.forEach((i) => results.push({ label: `${i.sku} @ ${i.warehouse}`, sub: `Available: ${i.available}`, href: "/inventory", type: "Inventory" }));
+  return results;
+}
 
 export function AppShell({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const [session, setSession] = useState<DemoSession | null>(null);
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const active = getSession();
-    if (!active) {
-      router.replace("/login");
-      return;
-    }
-    setSession(active);
+  const searchIndex = useMemo(() => buildSearchIndex(), []);
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return searchIndex.filter((r) => r.label.toLowerCase().includes(q) || r.sub.toLowerCase().includes(q)).slice(0, 8);
+  }, [searchQuery, searchIndex]);
+
+  const handleSearchSelect = useCallback((result: SearchResult) => {
+    setSearchQuery("");
+    setSearchOpen(false);
+    router.push(result.href);
   }, [router]);
 
+  // Close search on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.replace("/login");
+    }
+  }, [isLoading, isAuthenticated, router]);
+
   const visibleItems = useMemo(() => {
-    if (!session) return navigationItems.filter((item) => !item.secondary);
+    if (!user) return navigationItems.filter((item) => !item.secondary);
     return navigationItems.filter((item) => {
       const area = item.href.split("?")[0].replace("/", "") || "dashboard";
-      return !item.secondary && canAccess(session.role, area);
+      return !item.secondary && canAccess(user.role, area);
     });
-  }, [session]);
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -102,7 +140,7 @@ export function AppShell({ children, title, subtitle }: { children: React.ReactN
     </aside>
   );
 
-  if (!session) {
+  if (!user || isLoading) {
     return <div className="min-h-screen bg-background" />;
   }
 
@@ -143,9 +181,37 @@ export function AppShell({ children, title, subtitle }: { children: React.ReactN
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="relative min-w-0 sm:w-72">
+                <div className="relative min-w-0 sm:w-72" ref={searchRef}>
                   <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input className="pl-9" placeholder="Search SKU, order, warehouse" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search SKU, order, warehouse…"
+                    value={searchQuery}
+                    onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+                    onFocus={() => setSearchOpen(true)}
+                  />
+                  {searchOpen && searchResults.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-80 overflow-auto rounded-lg border bg-background shadow-lg">
+                      {searchResults.map((r, i) => (
+                        <button
+                          key={i}
+                          className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted"
+                          onClick={() => handleSearchSelect(r)}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{r.label}</p>
+                            <p className="truncate text-xs text-muted-foreground">{r.sub}</p>
+                          </div>
+                          <Badge variant="secondary" className="shrink-0 text-[10px]">{r.type}</Badge>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {searchOpen && searchQuery.trim() && searchResults.length === 0 && (
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border bg-background p-4 text-center text-sm text-muted-foreground shadow-lg">
+                      No results for &ldquo;{searchQuery}&rdquo;
+                    </div>
+                  )}
                 </div>
                 <NotificationCenter />
                 <Button
@@ -162,8 +228,8 @@ export function AppShell({ children, title, subtitle }: { children: React.ReactN
                     <UserRound className="size-4" />
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{session.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{session.role.replaceAll("_", " ")}</p>
+                    <p className="truncate text-sm font-medium">{user.name}</p>
+                    <p className="text-[11px] text-muted-foreground">{user.role.replaceAll("_", " ")}</p>
                   </div>
                   <Button variant="ghost" size="icon" onClick={handleLogout} aria-label="Logout">
                     <LogOut />

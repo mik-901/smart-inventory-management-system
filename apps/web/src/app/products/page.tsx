@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useMemo, useState } from "react";
-import { Edit, Search, Trash2 } from "lucide-react";
+import { Check, Edit, Search, Trash2, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { products as initialProducts } from "@/lib/demo-data";
@@ -29,6 +30,38 @@ export default function ProductsPage() {
   const [rows, setRows] = useState<Product[]>(initialProducts);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Partial<Product>>({});
+
+  const filtered = useMemo(() => {
+    return rows.filter((product) => {
+      const matchesQuery = [product.name, product.sku, product.brand, product.supplier, product.barcode]
+        .join(" ")
+        .toLowerCase()
+        .includes(query.toLowerCase());
+      const matchesCategory = category === "All" || product.category === category;
+      return matchesQuery && matchesCategory;
+    });
+  }, [category, query, rows]);
+
+  const startEdit = (product: Product) => {
+    setEditId(product.id);
+    setEditDraft({ name: product.name, price: product.price, costPrice: product.costPrice, reorderLevel: product.reorderLevel, supplier: product.supplier, brand: product.brand, category: product.category });
+  };
+
+  const saveEdit = (id: string) => {
+    setRows((current) => current.map((p) => (p.id === id ? { ...p, ...editDraft } : p)));
+    setEditId(null);
+    setEditDraft({});
+    toast.success("Product updated");
+  };
+
+  const cancelEdit = () => { setEditId(null); setEditDraft({}); };
+
+  const deleteProduct = (id: string, sku: string) => {
+    setRows((current) => current.filter((item) => item.id !== id));
+    toast.success(`${sku} deleted`);
+  };
 
   const filtered = useMemo(() => {
     return rows.filter((product) => {
@@ -120,30 +153,53 @@ export default function ProductsPage() {
                           className="size-11 rounded-md object-cover"
                         />
                         <div>
-                          <p className="font-medium">{product.name}</p>
+                          {editId === product.id ? (
+                            <Input className="h-7 text-sm" value={editDraft.name ?? ""} onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))} />
+                          ) : (
+                            <p className="font-medium">{product.name}</p>
+                          )}
                           <p className="text-xs text-muted-foreground">{product.brand} · {product.variants.join(", ")}</p>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{product.sku}</TableCell>
-                    <TableCell>{product.category}</TableCell>
                     <TableCell>
-                      <div>
-                        <p className="font-medium">{formatCurrency(product.price)}</p>
-                        <p className="text-xs text-muted-foreground">Cost {formatCurrency(product.costPrice)}</p>
-                      </div>
+                      {editId === product.id ? (
+                        <Select className="h-7 text-xs" value={editDraft.category ?? product.category} onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value }))}>
+                          <option>Electronics</option><option>Hardware</option><option>IoT</option><option>Packaging</option><option>Consumables</option>
+                        </Select>
+                      ) : product.category}
+                    </TableCell>
+                    <TableCell>
+                      {editId === product.id ? (
+                        <div className="space-y-1">
+                          <Input className="h-7 w-24 text-xs" type="number" value={editDraft.price ?? ""} onChange={(e) => setEditDraft((d) => ({ ...d, price: Number(e.target.value) }))} />
+                          <Input className="h-7 w-24 text-xs" type="number" value={editDraft.costPrice ?? ""} onChange={(e) => setEditDraft((d) => ({ ...d, costPrice: Number(e.target.value) }))} placeholder="Cost" />
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="font-medium">{formatCurrency(product.price)}</p>
+                          <p className="text-xs text-muted-foreground">Cost {formatCurrency(product.costPrice)}</p>
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
                         <Badge variant={statusVariant[product.status]}>{product.status}</Badge>
-                        <p className="text-xs text-muted-foreground">{product.stock} units · reorder {product.reorderLevel}</p>
+                        <p className="text-xs text-muted-foreground">{product.stock} units · reorder {editId === product.id ? (
+                          <Input className="ml-1 inline-block h-6 w-14 text-xs" type="number" value={editDraft.reorderLevel ?? ""} onChange={(e) => setEditDraft((d) => ({ ...d, reorderLevel: Number(e.target.value) }))} />
+                        ) : product.reorderLevel}</p>
                       </div>
                     </TableCell>
                     <TableCell>
                       <p className="text-sm">{product.batchNumber || "Unbatched"}</p>
                       <p className="text-xs text-muted-foreground">{product.expiryDate || "No expiry"}</p>
                     </TableCell>
-                    <TableCell>{product.supplier}</TableCell>
+                    <TableCell>
+                      {editId === product.id ? (
+                        <Input className="h-7 w-28 text-xs" value={editDraft.supplier ?? ""} onChange={(e) => setEditDraft((d) => ({ ...d, supplier: e.target.value }))} />
+                      ) : product.supplier}
+                    </TableCell>
                     <TableCell>
                       <div className="rounded-md bg-white p-1">
                         <QRCodeSVG value={product.barcode || product.sku} size={48} />
@@ -151,19 +207,17 @@ export default function ProductsPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="icon" onClick={() => toast.info(`Editing ${product.sku}`)}>
-                          <Edit />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => {
-                            setRows((current) => current.filter((item) => item.id !== product.id));
-                            toast.success(`${product.sku} deleted`);
-                          }}
-                        >
-                          <Trash2 />
-                        </Button>
+                        {editId === product.id ? (
+                          <>
+                            <Button variant="default" size="icon" onClick={() => saveEdit(product.id)}><Check className="size-4" /></Button>
+                            <Button variant="outline" size="icon" onClick={cancelEdit}><X className="size-4" /></Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button variant="outline" size="icon" onClick={() => startEdit(product)}><Edit className="size-4" /></Button>
+                            <Button variant="outline" size="icon" onClick={() => deleteProduct(product.id, product.sku)}><Trash2 className="size-4" /></Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

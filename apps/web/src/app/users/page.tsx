@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Shield, UserPlus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Search, Shield, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/layout/app-shell";
@@ -24,10 +24,61 @@ const roleLabel: Record<UserRole, string> = {
 
 export default function UsersPage() {
   const [rows, setRows] = useState<AppUser[]>(initialUsers);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [inviteName, setInviteName] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<UserRole>("VIEWER");
+
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((u) => [u.name, u.email, u.role].join(" ").toLowerCase().includes(q));
+  }, [searchQuery, rows]);
 
   const updateRole = (id: string, role: UserRole) => {
     setRows((current) => current.map((user) => (user.id === id ? { ...user, role } : user)));
     toast.success("Role updated");
+  };
+
+  const inviteUser = () => {
+    if (!inviteName.trim() || !inviteEmail.trim()) {
+      toast.error("Please enter name and email");
+      return;
+    }
+    if (rows.some((u) => u.email === inviteEmail)) {
+      toast.error("A user with this email already exists");
+      return;
+    }
+    const newUser: AppUser = {
+      id: `usr-${crypto.randomUUID().slice(0, 8)}`,
+      name: inviteName,
+      email: inviteEmail,
+      role: inviteRole,
+      lastLogin: "Never",
+      status: "Invited"
+    };
+    setRows((cur) => [...cur, newUser]);
+    setInviteName("");
+    setInviteEmail("");
+    setInviteRole("VIEWER");
+    toast.success(`Invitation sent to ${inviteEmail}`);
+  };
+
+  const toggleStatus = (id: string) => {
+    setRows((cur) =>
+      cur.map((u) => {
+        if (u.id !== id) return u;
+        const next = u.status === "Active" ? "Suspended" : "Active";
+        toast.success(`${u.name} is now ${next}`);
+        return { ...u, status: next as AppUser["status"] };
+      })
+    );
+  };
+
+  const deleteUser = (id: string) => {
+    const u = rows.find((r) => r.id === id);
+    setRows((cur) => cur.filter((r) => r.id !== id));
+    toast.success(`${u?.name ?? "User"} removed`);
   };
 
   return (
@@ -41,21 +92,21 @@ export default function UsersPage() {
           <CardContent className="grid gap-4">
             <div className="space-y-2">
               <Label>Name</Label>
-              <Input placeholder="Priya Shah" />
+              <Input placeholder="Priya Shah" value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label>Email</Label>
-              <Input type="email" placeholder="priya@company.com" />
+              <Input type="email" placeholder="priya@company.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label>Role</Label>
-              <Select className="w-full" defaultValue="VIEWER">
+              <Select className="w-full" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as UserRole)}>
                 {Object.entries(roleLabel).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </Select>
             </div>
-            <Button onClick={() => toast.success("Invitation sent")}>
+            <Button onClick={inviteUser}>
               <UserPlus />
               Send Invite
             </Button>
@@ -82,8 +133,16 @@ export default function UsersPage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Team Access</CardTitle>
-          <CardDescription>Manage login status, role assignments, and audit ownership.</CardDescription>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Team Access</CardTitle>
+              <CardDescription>Manage login status, role assignments, and audit ownership.</CardDescription>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Search users..." className="pl-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table className="min-w-[780px]">
@@ -94,10 +153,11 @@ export default function UsersPage() {
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Last Login</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((user) => (
+              {filtered.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell className="font-medium">{user.name}</TableCell>
                   <TableCell>{user.email}</TableCell>
@@ -109,11 +169,21 @@ export default function UsersPage() {
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.status === "Active" ? "success" : "warning"}>{user.status}</Badge>
+                    <button type="button" onClick={() => toggleStatus(user.id)} className="cursor-pointer">
+                      <Badge variant={user.status === "Active" ? "success" : user.status === "Invited" ? "secondary" : "warning"}>{user.status}</Badge>
+                    </button>
                   </TableCell>
                   <TableCell>{user.lastLogin}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon" onClick={() => deleteUser(user.id)}>
+                      <Trash2 className="size-4 text-destructive" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
+              {filtered.length === 0 && (
+                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No users match your search.</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>

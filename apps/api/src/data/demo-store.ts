@@ -9,10 +9,10 @@ export const demoStore = {
     revenue: 1845000
   },
   users: [
-    { id: "usr-001", name: "Aarav Mehta", email: "admin@demo.com", role: "SUPER_ADMIN" as Role, lastLogin: "Now", status: "Active" },
-    { id: "usr-002", name: "Maya Kapoor", email: "manager@demo.com", role: "MANAGER" as Role, lastLogin: "2 hours ago", status: "Active" },
-    { id: "usr-003", name: "Kabir Sethi", email: "staff@demo.com", role: "WAREHOUSE_STAFF" as Role, lastLogin: "Yesterday", status: "Active" },
-    { id: "usr-004", name: "Nisha Rao", email: "viewer@demo.com", role: "VIEWER" as Role, lastLogin: "3 days ago", status: "Invited" }
+    { id: "usr-001", name: "Aarav Mehta", email: "admin@demo.com", role: "SUPER_ADMIN" as Role, passwordHash: "", lastLogin: "Now", status: "Active" },
+    { id: "usr-002", name: "Maya Kapoor", email: "manager@demo.com", role: "MANAGER" as Role, passwordHash: "", lastLogin: "2 hours ago", status: "Active" },
+    { id: "usr-003", name: "Kabir Sethi", email: "staff@demo.com", role: "WAREHOUSE_STAFF" as Role, passwordHash: "", lastLogin: "Yesterday", status: "Active" },
+    { id: "usr-004", name: "Nisha Rao", email: "viewer@demo.com", role: "VIEWER" as Role, passwordHash: "", lastLogin: "3 days ago", status: "Invited" }
   ],
   products: [
     {

@@ -9,6 +9,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   CLERK_JWKS_URL: z.string().optional(),
+  JWT_SECRET: z.string().default("dev-secret-change-in-production-32chars!"),
   JWT_AUDIENCE: z.string().default("smart-inventory"),
   JWT_ISSUER: z.string().optional(),
   EMAIL_FROM: z.string().email().default("inventory@example.com"),

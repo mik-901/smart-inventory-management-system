@@ -1,19 +1,69 @@
-import { Building2, MapPin, PackageCheck, Truck } from "lucide-react";
+"use client";
+
+import { useMemo, useState } from "react";
+import { Building2, MapPin, PackageCheck, Plus, Search, Trash2, Truck, X } from "lucide-react";
+import { toast } from "sonner";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { warehouses } from "@/lib/demo-data";
+import { warehouses as initialWarehouses } from "@/lib/demo-data";
 import { formatCurrency, formatNumber } from "@/lib/utils";
+import type { Warehouse } from "@/types";
 
 export default function WarehousesPage() {
+  const [rows, setRows] = useState<Warehouse[]>(initialWarehouses);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formCode, setFormCode] = useState("");
+  const [formCity, setFormCity] = useState("");
+  const [formManager, setFormManager] = useState("");
+  const [formCapacity, setFormCapacity] = useState("5000");
+
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((w) => [w.name, w.code, w.city, w.manager].join(" ").toLowerCase().includes(q));
+  }, [searchQuery, rows]);
+
+  const addWarehouse = () => {
+    if (!formName.trim() || !formCode.trim() || !formCity.trim()) {
+      toast.error("Please fill in name, code, and city");
+      return;
+    }
+    const newWarehouse: Warehouse = {
+      id: crypto.randomUUID(),
+      name: formName,
+      code: formCode.toUpperCase(),
+      city: formCity,
+      manager: formManager || "Unassigned",
+      capacity: Number(formCapacity) || 5000,
+      utilization: 0,
+      stockValue: 0,
+      ordersToday: 0
+    };
+    setRows((cur) => [...cur, newWarehouse]);
+    setFormName(""); setFormCode(""); setFormCity(""); setFormManager(""); setFormCapacity("5000");
+    setShowForm(false);
+    toast.success(`${newWarehouse.name} added`);
+  };
+
+  const deleteWarehouse = (id: string) => {
+    const w = rows.find((r) => r.id === id);
+    setRows((cur) => cur.filter((r) => r.id !== id));
+    toast.success(`${w?.name ?? "Warehouse"} removed`);
+  };
+
   return (
     <AppShell title="Warehouses" subtitle="Regional stock visibility, capacity utilization, and fulfillment performance.">
       <div className="grid gap-4 md:grid-cols-3">
-        {warehouses.map((warehouse) => (
+        {filtered.slice(0, 6).map((warehouse) => (
           <Card key={warehouse.id} className="p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -56,14 +106,47 @@ export default function WarehousesPage() {
               <CardTitle>Warehouse Wise Report</CardTitle>
               <CardDescription>Capacity, manager ownership, stock value, and live order load.</CardDescription>
             </div>
-            <Button>
-              <PackageCheck />
-              Add Warehouse
-            </Button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative sm:w-64">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" placeholder="Search warehouses…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+              </div>
+              <Button onClick={() => setShowForm((v) => !v)}>
+                {showForm ? <X className="size-4" /> : <PackageCheck className="size-4" />}
+                {showForm ? "Cancel" : "Add Warehouse"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
+        {showForm && (
+          <CardContent className="border-b pb-6">
+            <div className="grid gap-4 sm:grid-cols-5">
+              <div className="space-y-1">
+                <Label>Name</Label>
+                <Input placeholder="Pune East Hub" value={formName} onChange={(e) => setFormName(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Code</Label>
+                <Input placeholder="PUN-EST" value={formCode} onChange={(e) => setFormCode(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>City</Label>
+                <Input placeholder="Pune" value={formCity} onChange={(e) => setFormCity(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Manager</Label>
+                <Input placeholder="Name" value={formManager} onChange={(e) => setFormManager(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Capacity</Label>
+                <Input type="number" value={formCapacity} onChange={(e) => setFormCapacity(e.target.value)} />
+              </div>
+            </div>
+            <Button className="mt-4" onClick={addWarehouse}><Plus className="size-4" /> Add</Button>
+          </CardContent>
+        )}
         <CardContent className="overflow-x-auto">
-          <Table className="min-w-[800px]">
+          <Table className="min-w-[900px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Warehouse</TableHead>
@@ -72,10 +155,11 @@ export default function WarehousesPage() {
                 <TableHead>Orders Today</TableHead>
                 <TableHead>Utilization</TableHead>
                 <TableHead>Dispatch</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {warehouses.map((warehouse) => (
+              {filtered.map((warehouse) => (
                 <TableRow key={warehouse.id}>
                   <TableCell>
                     <p className="font-medium">{warehouse.name}</p>
@@ -96,8 +180,16 @@ export default function WarehousesPage() {
                       On track
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="icon" onClick={() => deleteWarehouse(warehouse.id)}><Trash2 className="size-4" /></Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
+              {filtered.length === 0 && (
+                <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No warehouses found</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>

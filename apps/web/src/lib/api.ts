@@ -10,6 +10,7 @@ import {
   users,
   warehouses
 } from "@/lib/demo-data";
+import { getAccessToken } from "@/lib/auth-context";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -41,12 +42,24 @@ const fallback: DemoMap = {
 
 export async function getApi<K extends keyof DemoMap>(path: K): Promise<DemoMap[K]> {
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    const token = getAccessToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_URL}${path}`, {
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers,
       next: { revalidate: 30 }
     });
+
+    if (response.status === 401) {
+      // Token expired — fall back to demo data
+      return fallback[path];
+    }
 
     if (!response.ok) throw new Error(`API failed: ${response.status}`);
     const payload = await response.json();

@@ -7,6 +7,7 @@ import type { Role } from "../data/demo-store.js";
 export type AuthUser = {
   id: string;
   email: string;
+  name: string;
   role: Role;
 };
 
@@ -15,25 +16,14 @@ export type AuthRequest = Request & {
 };
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-
-function parseDemoToken(token: string): AuthUser | null {
-  if (!token.startsWith("demo.")) return null;
-
-  const [, payload] = token.split(".");
-  if (!payload) return null;
-  const decoded = Buffer.from(payload, "base64").toString("utf8");
-  const [email, role] = decoded.split(":");
-
-  if (!email || !role) return null;
-  return { id: email, email, role: role as Role };
-}
+const JWT_SECRET = new TextEncoder().encode(env.JWT_SECRET);
 
 export async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
 
   if (!token && env.NODE_ENV !== "production") {
-    req.user = { id: "demo", email: "admin@demo.com", role: "SUPER_ADMIN" };
+    req.user = { id: "demo", email: "admin@demo.com", name: "Demo Admin", role: "SUPER_ADMIN" };
     return next();
   }
 
@@ -41,27 +31,49 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
     return res.status(401).json({ error: "Missing bearer token" });
   }
 
-  const demoUser = parseDemoToken(token);
-  if (demoUser) {
-    req.user = demoUser;
-    return next();
-  }
-
+  // 1. Try our own JWT (signed with JWT_SECRET)
   try {
-    if (!env.CLERK_JWKS_URL) throw new Error("CLERK_JWKS_URL is not configured");
-    jwks ??= createRemoteJWKSet(new URL(env.CLERK_JWKS_URL));
-    const verified = await jwtVerify(token, jwks, {
+    const { payload } = await jwtVerify(token, JWT_SECRET, {
       audience: env.JWT_AUDIENCE,
-      issuer: env.JWT_ISSUER
+      issuer: env.JWT_ISSUER ?? "smart-inventory-api"
     });
 
+    // Reject refresh tokens used as access tokens
+    if (payload.type === "refresh") {
+      return res.status(401).json({ error: "Invalid token type" });
+    }
+
     req.user = {
-      id: String(verified.payload.sub),
-      email: String(verified.payload.email ?? ""),
-      role: (verified.payload.publicMetadata as { role?: Role } | undefined)?.role ?? "VIEWER"
+      id: String(payload.sub),
+      email: String(payload.email ?? ""),
+      name: String(payload.name ?? ""),
+      role: (payload.role as Role) ?? "VIEWER"
     };
     return next();
   } catch {
-    return res.status(401).json({ error: "Invalid token" });
+    // Not one of our tokens — fall through to Clerk JWKS
   }
+
+  // 2. Try Clerk JWKS if configured
+  if (env.CLERK_JWKS_URL) {
+    try {
+      jwks ??= createRemoteJWKSet(new URL(env.CLERK_JWKS_URL));
+      const verified = await jwtVerify(token, jwks, {
+        audience: env.JWT_AUDIENCE,
+        issuer: env.JWT_ISSUER
+      });
+
+      req.user = {
+        id: String(verified.payload.sub),
+        email: String(verified.payload.email ?? ""),
+        name: String(verified.payload.name ?? ""),
+        role: (verified.payload.publicMetadata as { role?: Role } | undefined)?.role ?? "VIEWER"
+      };
+      return next();
+    } catch {
+      // Also failed
+    }
+  }
+
+  return res.status(401).json({ error: "Invalid or expired token" });
 }

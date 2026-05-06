@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRightLeft, Minus, Plus, RefreshCcw, ShieldAlert } from "lucide-react";
+import { ArrowRightLeft, Minus, Plus, RefreshCcw, Search, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/layout/app-shell";
@@ -23,11 +23,18 @@ export default function InventoryPage() {
   const [mode, setMode] = useState<ActionMode>("add");
   const [sku, setSku] = useState(initialInventory[0].sku);
   const [quantity, setQuantity] = useState("10");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const selected = useMemo(() => rows.find((row) => row.sku === sku) ?? rows[0], [rows, sku]);
   const totalAvailable = rows.reduce((sum, row) => sum + row.available, 0);
   const totalReserved = rows.reduce((sum, row) => sum + row.reserved, 0);
   const totalDamaged = rows.reduce((sum, row) => sum + row.damaged, 0);
+
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((r) => [r.product, r.sku, r.warehouse].join(" ").toLowerCase().includes(q));
+  }, [searchQuery, rows]);
 
   const applyAdjustment = () => {
     const amount = Number(quantity || 0);
@@ -157,8 +164,16 @@ export default function InventoryPage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Live Warehouse Stock</CardTitle>
-          <CardDescription>Stock quantities by SKU and warehouse with reorder health.</CardDescription>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Live Warehouse Stock</CardTitle>
+              <CardDescription>Stock quantities by SKU and warehouse with reorder health.</CardDescription>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Search product, SKU, warehouse..." className="pl-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table className="min-w-[900px]">
@@ -174,7 +189,7 @@ export default function InventoryPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
                     <p className="font-medium">{row.product}</p>
@@ -192,6 +207,9 @@ export default function InventoryPage() {
                   <TableCell>{row.lastSync}</TableCell>
                 </TableRow>
               ))}
+              {filteredRows.length === 0 && (
+                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No inventory items match your search.</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>
