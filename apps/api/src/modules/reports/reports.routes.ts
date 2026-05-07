@@ -5,6 +5,7 @@ import PDFDocument from "pdfkit";
 
 import { demoStore } from "../../data/demo-store.js";
 import { requirePermission } from "../../middleware/rbac.js";
+import { pool, query } from "../../db/pool.js";
 
 export const reportsRouter = Router();
 
@@ -18,7 +19,25 @@ const reportDefinitions = [
   { report: "Supplier wise report", owner: "Procurement", rows: 126, freshness: "Daily", format: "Excel / CSV" }
 ];
 
-function rowsForReport(report: string) {
+async function rowsForReport(report: string) {
+  if (pool) {
+    if (report.toLowerCase().includes("warehouse")) {
+      return await query("SELECT name, code, city, capacity, utilization FROM warehouses");
+    }
+    if (report.toLowerCase().includes("movement")) {
+      return await query("SELECT * FROM transactions ORDER BY created_at DESC LIMIT 1000");
+    }
+    if (report.toLowerCase().includes("supplier")) {
+      return await query("SELECT sku, name as product, supplier FROM products WHERE supplier IS NOT NULL");
+    }
+    const rows = await query(`
+      SELECT p.sku, p.name as product, p.category, COALESCE(SUM(i.quantity), 0) as stock, COALESCE(SUM(i.quantity * p.cost_price), 0) as value, p.status
+      FROM products p LEFT JOIN inventory i ON p.id = i.product_id
+      GROUP BY p.id
+    `);
+    return rows;
+  }
+
   if (report.toLowerCase().includes("warehouse")) return demoStore.warehouses;
   if (report.toLowerCase().includes("movement")) return demoStore.activities;
   if (report.toLowerCase().includes("supplier")) return demoStore.products.map((product) => ({ sku: product.sku, product: product.name, supplier: product.supplier }));
@@ -39,7 +58,7 @@ reportsRouter.get("/", requirePermission("reports:read"), (_req, res) => {
 reportsRouter.get("/export", requirePermission("reports:read"), async (req, res) => {
   const report = String(req.query.report ?? "Stock valuation");
   const format = String(req.query.format ?? "csv");
-  const rows = rowsForReport(report);
+  const rows = await rowsForReport(report);
   const filename = report.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   if (format === "csv") {
