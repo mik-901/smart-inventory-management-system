@@ -1,6 +1,7 @@
 import type { AuthRequest } from "../middleware/auth.js";
 import { demoStore } from "../data/demo-store.js";
 import { pool, query } from "../db/pool.js";
+import crypto from "node:crypto";
 
 export async function writeAudit(req: AuthRequest, action: string, entity: string) {
   if (!pool) {

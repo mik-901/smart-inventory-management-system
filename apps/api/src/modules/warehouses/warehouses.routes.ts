@@ -3,6 +3,7 @@ import { Router } from "express";
 import { demoStore } from "../../data/demo-store.js";
 import { requirePermission } from "../../middleware/rbac.js";
 import { pool, query } from "../../db/pool.js";
+import crypto from "node:crypto";
 
 export const warehousesRouter = Router();
 

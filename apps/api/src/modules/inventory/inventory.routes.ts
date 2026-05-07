@@ -7,6 +7,7 @@ import { inventoryAdjustmentSchema } from "../../validators/schemas.js";
 import { writeAudit } from "../../utils/audit.js";
 import type { AuthRequest } from "../../middleware/auth.js";
 import { pool, query } from "../../db/pool.js";
+import crypto from "node:crypto";
 
 export const inventoryRouter = Router();
 
