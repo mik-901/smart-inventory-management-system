@@ -87,7 +87,7 @@ ordersRouter.patch("/:id/status", requirePermission("orders:write"), async (req:
       const rows = await query("UPDATE orders SET status = $1, updated_at = now() WHERE order_number = $2 RETURNING order_number", [status, req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Order not found" });
       
-      writeAudit(req, `updated order status to ${status}`, req.params.id);
+      writeAudit(req, `updated order status to ${status}`, req.params.id as string);
       return res.json({ data: { id: req.params.id, status } });
     } catch (error) {
       console.error(error);

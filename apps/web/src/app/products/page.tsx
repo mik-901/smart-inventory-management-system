@@ -63,16 +63,7 @@ export default function ProductsPage() {
     toast.success(`${sku} deleted`);
   };
 
-  const filtered = useMemo(() => {
-    return rows.filter((product) => {
-      const matchesQuery = [product.name, product.sku, product.brand, product.supplier]
-        .join(" ")
-        .toLowerCase()
-        .includes(query.toLowerCase());
-      const matchesCategory = category === "All" || product.category === category;
-      return matchesQuery && matchesCategory;
-    });
-  }, [category, query, rows]);
+
 
   return (
     <AppShell title="Products" subtitle="Create, edit, scan, and govern SKUs with supplier, batch, and variant metadata.">

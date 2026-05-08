@@ -65,7 +65,7 @@ function getReportData(report: string): Record<string, string | number | null | 
         Name: w.name,
         City: w.city,
         Manager: w.manager,
-        Capacity: w.capacityPct
+        Capacity: w.capacity
       }));
     case "Supplier wise report":
       return products.map((p) => ({
