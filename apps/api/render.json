@@ -1,0 +1,22 @@
+{
+  "$schema": "https://render.com/docs/deploy",
+  "service": {
+    "type": "web",
+    "name": "smart-inventory-api",
+    "runtime": "node",
+    "plan": "starter",
+    "region": "oregon",
+    "buildCommand": "npm install && npm run build",
+    "startCommand": "npm run start",
+    "env": {
+      "NODE_ENV": "production",
+      "PORT": "4000"
+    }
+  },
+  "database": {
+    "type": "postgres",
+    "name": "smart-inventory-db",
+    "region": "oregon",
+    "plan": "starter"
+  }
+}

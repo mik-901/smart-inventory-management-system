@@ -81,8 +81,28 @@ EMAIL_FROM = noreply@yourdomain.com
 ### Option B: Deploy to Heroku
 Similar steps - create a new app and connect your GitHub repo.
 
-### Option C: Deploy to Render
-Create a web service pointing to `apps/api` with Node.js environment.
+### Option C: Deploy to Render (Recommended Free Tier)
+1. Create Render account (render.com)
+2. Go to **New +** → **Web Service**
+3. Connect your GitHub repository
+4. Configuration:
+   - **Name**: `smart-inventory-api`
+   - **Root Directory**: `apps/api`
+   - **Runtime**: Node
+   - **Region**: oregon (or your preference)
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `npm run start`
+5. Click **Create Web Service**
+6. Add the same environment variables as Railway (see above)
+7. (Optional) Create PostgreSQL database in Render or use external provider
+
+**Key Differences from Railway:**
+- Free tier includes auto-pause (wakes on request after 15 min inactivity)
+- Can deploy from `render.yaml` in root directory (already included)
+- Built-in PostgreSQL available at $15/month
+- No credit card required for free tier
+
+See [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md) for detailed Render setup guide.
 
 ---
 

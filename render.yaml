@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: smart-inventory-api
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-inventory-db
+          property: connectionString
+      - key: CORS_ORIGIN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLERK_JWKS_URL
+        sync: false
+      - key: JWT_AUDIENCE
+        sync: false
+      - key: JWT_ISSUER
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+    rootDir: apps/api
+    
+  - type: postgres
+    name: smart-inventory-db
+    region: oregon
+    plan: starter
+    ipAllowList: []
