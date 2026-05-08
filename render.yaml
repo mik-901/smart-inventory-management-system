@@ -12,9 +12,7 @@ services:
       - key: PORT
         value: 4000
       - key: DATABASE_URL
-        fromDatabase:
-          name: smart-inventory-db
-          property: connectionString
+        sync: false
       - key: CORS_ORIGIN
         sync: false
       - key: SUPABASE_URL
@@ -38,9 +36,3 @@ services:
       - key: EMAIL_FROM
         sync: false
     rootDir: apps/api
-    
-  - type: postgres
-    name: smart-inventory-db
-    region: oregon
-    plan: starter
-    ipAllowList: []
