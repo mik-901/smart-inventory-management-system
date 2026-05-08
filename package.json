@@ -12,6 +12,8 @@
     "dev:web": "npm run dev -w @smart-inventory/web",
     "dev:api": "npm run dev -w @smart-inventory/api",
     "build": "npm run build --workspaces --if-present",
+    "build:api": "npm run build -w @smart-inventory/api",
+    "start": "npm run start -w @smart-inventory/api",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
