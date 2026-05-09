@@ -104,9 +104,9 @@ authRouter.post("/register", validateBody(registerSchema), async (req, res) => {
         ...tokens
       }
     });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Registration failed" });
+  } catch (error: any) {
+    console.error("REGISTER ERROR:", error);
+    return res.status(500).json({ error: "Registration failed", detail: error?.message ?? String(error) });
   }
 });
 
@@ -158,8 +158,9 @@ authRouter.post("/login", validateBody(loginSchema), async (req, res) => {
         ...tokens
       }
     });
-  } catch (error) {
-    return res.status(500).json({ error: "Login failed" });
+  } catch (error: any) {
+    console.error("LOGIN ERROR:", error);
+    return res.status(500).json({ error: "Login failed", detail: error?.message ?? String(error) });
   }
 });
 
