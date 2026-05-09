@@ -205,17 +205,19 @@ create trigger inventory_set_updated_at before update on inventory for each row 
 drop trigger if exists orders_set_updated_at on orders;
 create trigger orders_set_updated_at before update on orders for each row execute function set_updated_at();
 
-alter table users enable row level security;
-alter table suppliers enable row level security;
-alter table warehouses enable row level security;
-alter table products enable row level security;
-alter table inventory enable row level security;
-alter table orders enable row level security;
-alter table order_items enable row level security;
-alter table returns enable row level security;
-alter table transactions enable row level security;
-alter table audit_logs enable row level security;
-alter table notifications enable row level security;
-alter table login_history enable row level security;
+-- RLS is DISABLED because our Express API handles all authentication
+-- and authorization via JWT tokens + RBAC middleware (requirePermission).
+-- Enabling RLS without policies blocks ALL database operations.
+alter table users disable row level security;
+alter table suppliers disable row level security;
+alter table warehouses disable row level security;
+alter table products disable row level security;
+alter table inventory disable row level security;
+alter table orders disable row level security;
+alter table order_items disable row level security;
+alter table returns disable row level security;
+alter table transactions disable row level security;
+alter table audit_logs disable row level security;
+alter table notifications disable row level security;
+alter table login_history disable row level security;
 
--- Supabase service role bypasses RLS. Application access is expected through the Express API.
