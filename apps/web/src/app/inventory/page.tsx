@@ -188,7 +188,6 @@ export default function InventoryPage() {
                 </div>
               </div>
             ) : null}
-            ) : null}
             <div className="flex flex-wrap items-center gap-3">
               <Button onClick={() => void applyAdjustment()} disabled={!selected}>
                 <RefreshCcw className="mr-2 size-4" />
