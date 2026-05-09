@@ -15,7 +15,6 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAdjustInventory, useInventory } from "@/hooks/useInventory";
 import { useWarehouses } from "@/hooks/useWarehouses";
-import { env } from "@/lib/env";
 
 type ActionMode = "add" | "remove" | "transfer" | "damage";
 
