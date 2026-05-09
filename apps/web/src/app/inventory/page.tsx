@@ -69,7 +69,7 @@ export default function InventoryPage() {
 
       const token = localStorage.getItem("accessToken");
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-      
+
       const res = await fetch(`${apiUrl}/inventory/import`, {
         method: "POST",
         headers: {
@@ -87,7 +87,7 @@ export default function InventoryPage() {
       } else {
         toast.success(`Successfully imported ${data.data?.imported || 0} inventory rows`);
       }
-      
+
       void refetch();
     } catch (error: any) {
       toast.error(error.message || "Failed to import CSV");
@@ -193,12 +193,12 @@ export default function InventoryPage() {
                 <RefreshCcw className="mr-2 size-4" />
                 Sync Stock
               </Button>
-              <input 
-                type="file" 
-                accept=".csv" 
-                className="hidden" 
-                ref={fileInputRef} 
-                onChange={(e) => void handleFileUpload(e)} 
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                ref={fileInputRef}
+                onChange={(e) => void handleFileUpload(e)}
               />
               <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
                 {isUploading ? <RefreshCcw className="mr-2 size-4 animate-spin" /> : <Upload className="mr-2 size-4" />}
