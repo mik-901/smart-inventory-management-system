@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ArrowRightLeft, Minus, Plus, RefreshCcw, Search, ShieldAlert } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { ArrowRightLeft, FileSpreadsheet, Minus, Plus, RefreshCcw, Search, ShieldAlert, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/layout/app-shell";
@@ -13,22 +13,28 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { inventory as initialInventory, products, warehouses } from "@/lib/demo-data";
-import type { InventoryItem } from "@/types";
+import { useAdjustInventory, useInventory } from "@/hooks/useInventory";
+import { useWarehouses } from "@/hooks/useWarehouses";
+import { env } from "@/lib/env";
 
 type ActionMode = "add" | "remove" | "transfer" | "damage";
 
 export default function InventoryPage() {
-  const [rows, setRows] = useState<InventoryItem[]>(initialInventory);
+  const { data: rows, refetch, isLoading } = useInventory();
+  const { data: warehouses } = useWarehouses();
+  const adjustInventory = useAdjustInventory(refetch);
   const [mode, setMode] = useState<ActionMode>("add");
-  const [sku, setSku] = useState(initialInventory[0].sku);
+  const [sku, setSku] = useState("");
+  const [warehouse, setWarehouse] = useState("");
   const [quantity, setQuantity] = useState("10");
   const [searchQuery, setSearchQuery] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selected = useMemo(() => rows.find((row) => row.sku === sku) ?? rows[0], [rows, sku]);
+  const selected = useMemo(() => rows.find((row) => row.sku === (sku || rows[0]?.sku)) ?? rows[0], [rows, sku]);
   const totalAvailable = rows.reduce((sum, row) => sum + row.available, 0);
   const totalReserved = rows.reduce((sum, row) => sum + row.reserved, 0);
-  const totalDamaged = rows.reduce((sum, row) => sum + row.damaged, 0);
+  const totalDamaged = rows.reduce((sum, row) => sum + (row.damaged ?? 0), 0);
 
   const filteredRows = useMemo(() => {
     if (!searchQuery.trim()) return rows;
@@ -36,31 +42,59 @@ export default function InventoryPage() {
     return rows.filter((r) => [r.product, r.sku, r.warehouse].join(" ").toLowerCase().includes(q));
   }, [searchQuery, rows]);
 
-  const applyAdjustment = () => {
+  const applyAdjustment = async () => {
     const amount = Number(quantity || 0);
     if (!amount || amount < 1) {
       toast.error("Enter a valid quantity");
       return;
     }
 
-    setRows((current) =>
-      current.map((row) => {
-        if (row.sku !== sku) return row;
-        if (mode === "add") return { ...row, available: row.available + amount, lastSync: "Live" };
-        if (mode === "remove") return { ...row, available: Math.max(row.available - amount, 0), lastSync: "Live" };
-        if (mode === "damage") {
-          return {
-            ...row,
-            available: Math.max(row.available - amount, 0),
-            damaged: row.damaged + amount,
-            lastSync: "Live"
-          };
-        }
-        return { ...row, available: Math.max(row.available - amount, 0), reserved: row.reserved + amount, lastSync: "Live" };
-      })
-    );
+    await adjustInventory.mutate({
+      sku: sku || selected?.sku,
+      warehouse: warehouse || selected?.warehouse,
+      quantity: amount,
+      type: mode === "damage" ? "DAMAGED" : mode === "add" ? "ADD" : "REMOVE",
+      reason: `${mode} from inventory screen`
+    });
+  };
 
-    toast.success(`${mode === "transfer" ? "Transfer order staged" : "Stock updated"} for ${sku}`);
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const token = localStorage.getItem("accessToken");
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+      
+      const res = await fetch(`${apiUrl}/inventory/import`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Upload failed");
+
+      if (data.data?.errors?.length > 0) {
+        toast.warning(`Imported ${data.data.imported} rows, but had ${data.data.errors.length} errors.`);
+        console.error("Import Errors:", data.data.errors);
+      } else {
+        toast.success(`Successfully imported ${data.data?.imported || 0} inventory rows`);
+      }
+      
+      void refetch();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to import CSV");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   return (
@@ -113,7 +147,7 @@ export default function InventoryPage() {
             <div className="grid gap-4 md:grid-cols-4">
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="sku">Product / SKU</Label>
-                <Select id="sku" value={sku} onChange={(event) => setSku(event.target.value)} className="w-full">
+                <Select id="sku" value={sku || rows[0]?.sku || ""} onChange={(event) => setSku(event.target.value)} className="w-full">
                   {rows.map((row) => (
                     <option key={row.id} value={row.sku}>
                       {row.product} · {row.sku}
@@ -123,7 +157,7 @@ export default function InventoryPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="warehouse">Warehouse</Label>
-                <Select id="warehouse" defaultValue={selected.warehouse} className="w-full">
+                <Select id="warehouse" value={warehouse || selected?.warehouse || ""} onChange={(event) => setWarehouse(event.target.value)} className="w-full">
                   {warehouses.map((warehouse) => (
                     <option key={warehouse.id}>{warehouse.name}</option>
                   ))}
@@ -154,10 +188,24 @@ export default function InventoryPage() {
                 </div>
               </div>
             ) : null}
-            <Button onClick={applyAdjustment}>
-              <RefreshCcw />
-              Sync Stock
-            </Button>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={() => void applyAdjustment()} disabled={!selected}>
+                <RefreshCcw className="mr-2 size-4" />
+                Sync Stock
+              </Button>
+              <input 
+                type="file" 
+                accept=".csv" 
+                className="hidden" 
+                ref={fileInputRef} 
+                onChange={(e) => void handleFileUpload(e)} 
+              />
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                {isUploading ? <RefreshCcw className="mr-2 size-4 animate-spin" /> : <Upload className="mr-2 size-4" />}
+                Import CSV
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -189,6 +237,9 @@ export default function InventoryPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {isLoading ? (
+                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Loading inventory...</TableCell></TableRow>
+              ) : null}
               {filteredRows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
@@ -198,7 +249,7 @@ export default function InventoryPage() {
                   <TableCell>{row.warehouse}</TableCell>
                   <TableCell className="font-semibold">{row.available}</TableCell>
                   <TableCell>{row.reserved}</TableCell>
-                  <TableCell>{row.damaged}</TableCell>
+                  <TableCell>{row.damaged ?? 0}</TableCell>
                   <TableCell>
                     <Badge variant={row.available <= row.reorderLevel ? "warning" : "success"}>
                       {row.available <= row.reorderLevel ? "Reorder" : "Healthy"}
@@ -207,7 +258,7 @@ export default function InventoryPage() {
                   <TableCell>{row.lastSync}</TableCell>
                 </TableRow>
               ))}
-              {filteredRows.length === 0 && (
+              {!isLoading && filteredRows.length === 0 && (
                 <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No inventory items match your search.</TableCell></TableRow>
               )}
             </TableBody>

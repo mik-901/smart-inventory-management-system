@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Bell,
   Boxes,
   Building2,
   ClipboardList,
@@ -18,10 +19,13 @@ export const navigationItems = [
   { href: "/inventory", label: "Inventory", icon: Boxes },
   { href: "/warehouses", label: "Warehouses", icon: Building2 },
   { href: "/orders", label: "Orders", icon: Truck },
+  { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
+  { href: "/sales-orders", label: "Sales Orders", icon: Truck },
+  { href: "/transfers", label: "Transfers", icon: Boxes },
   { href: "/returns", label: "Returns", icon: RotateCcw },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/users", label: "Users & Roles", icon: ShieldCheck },
   { href: "/activity", label: "Activity Logs", icon: Activity },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/orders?tab=purchase", label: "Purchase Orders", icon: ClipboardList, secondary: true }
+  { href: "/notifications", label: "Notifications", icon: Bell },
+  { href: "/settings", label: "Settings", icon: Settings }
 ];

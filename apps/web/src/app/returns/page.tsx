@@ -12,16 +12,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { orders, returns as initialReturns, warehouses } from "@/lib/demo-data";
-import type { ReturnRecord } from "@/types";
-
-let returnCounter = initialReturns.length + 1;
+import { useApiQuery } from "@/hooks/useApiResource";
+import { useApproveReturn, useCreateReturn, useRejectReturn, useReturns } from "@/hooks/useReturns";
+import { useProducts } from "@/hooks/useProducts";
+import { useWarehouses } from "@/hooks/useWarehouses";
+import { getApi } from "@/lib/api";
+import type { Order } from "@/types";
 
 export default function ReturnsPage() {
-  const [rows, setRows] = useState<ReturnRecord[]>(initialReturns);
+  const { data: rows, refetch, isLoading } = useReturns();
+  const { data: orders } = useApiQuery(() => getApi<Order[]>("/api/orders"), [], { initialData: [] });
+  const { data: warehouses } = useWarehouses();
+  const { data: products } = useProducts();
+  const createReturnMutation = useCreateReturn(refetch);
+  const approveReturn = useApproveReturn(refetch);
+  const rejectReturn = useRejectReturn(refetch);
   const [searchQuery, setSearchQuery] = useState("");
-  const [formOrder, setFormOrder] = useState(orders[0].number);
-  const [formWarehouse, setFormWarehouse] = useState(warehouses[0].name);
+  const [formOrder, setFormOrder] = useState("");
+  const [formWarehouse, setFormWarehouse] = useState("");
   const [formReason, setFormReason] = useState("Damaged during transit");
   const [formItems, setFormItems] = useState("1");
 
@@ -31,33 +39,22 @@ export default function ReturnsPage() {
     return rows.filter((r) => [r.number, r.orderNumber, r.reason, r.warehouse].join(" ").toLowerCase().includes(q));
   }, [searchQuery, rows]);
 
-  const createReturn = () => {
+  const createReturn = async () => {
     if (!formReason.trim()) { toast.error("Please enter a reason"); return; }
-    const newReturn: ReturnRecord = {
-      id: crypto.randomUUID(),
-      number: `RT-2026-${String(90 + returnCounter++).padStart(4, "0")}`,
-      orderNumber: formOrder,
+    const selectedWarehouse = warehouses.find((item) => item.name === (formWarehouse || warehouses[0]?.name));
+    const selectedProduct = products[0];
+    if (!selectedWarehouse || !selectedProduct) {
+      toast.error("Warehouse and product data must load first");
+      return;
+    }
+    await createReturnMutation.mutate({
+      referenceType: String(formOrder || orders[0]?.number || "").startsWith("PO") ? "purchase" : "sale",
+      warehouseId: selectedWarehouse.id,
       reason: formReason,
-      status: "Inspection",
-      items: Number(formItems) || 1,
-      warehouse: formWarehouse,
-      date: new Date().toISOString().split("T")[0]
-    };
-    setRows((cur) => [newReturn, ...cur]);
+      items: [{ productId: selectedProduct.id, quantity: Number(formItems) || 1, condition: "good", action: "restock" }]
+    });
     setFormReason("Damaged during transit");
     setFormItems("1");
-    toast.success(`${newReturn.number} created for inspection`);
-  };
-
-  const updateStatus = (id: string, status: string) => {
-    setRows((cur) => cur.map((r) => (r.id === id ? { ...r, status } : r)));
-    toast.success("Status updated");
-  };
-
-  const deleteReturn = (id: string) => {
-    const ret = rows.find((r) => r.id === id);
-    setRows((cur) => cur.filter((r) => r.id !== id));
-    toast.success(`${ret?.number ?? "Return"} deleted`);
   };
 
   return (
@@ -72,7 +69,7 @@ export default function ReturnsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Order</Label>
-                <Select className="w-full" value={formOrder} onChange={(e) => setFormOrder(e.target.value)}>
+                <Select className="w-full" value={formOrder || orders[0]?.number || ""} onChange={(e) => setFormOrder(e.target.value)}>
                   {orders.map((order) => (
                     <option key={order.id}>{order.number}</option>
                   ))}
@@ -80,7 +77,7 @@ export default function ReturnsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Warehouse</Label>
-                <Select className="w-full" value={formWarehouse} onChange={(e) => setFormWarehouse(e.target.value)}>
+                <Select className="w-full" value={formWarehouse || warehouses[0]?.name || ""} onChange={(e) => setFormWarehouse(e.target.value)}>
                   {warehouses.map((warehouse) => (
                     <option key={warehouse.id}>{warehouse.name}</option>
                   ))}
@@ -97,7 +94,7 @@ export default function ReturnsPage() {
                 <Input type="number" value={formItems} onChange={(e) => setFormItems(e.target.value)} min={1} />
               </div>
             </div>
-            <Button onClick={createReturn}>
+            <Button onClick={() => void createReturn()} disabled={!warehouses.length || !products.length}>
               <RotateCcw />
               Create Return
             </Button>
@@ -148,30 +145,29 @@ export default function ReturnsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {isLoading ? (
+                <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading returns...</TableCell></TableRow>
+              ) : null}
               {filtered.map((record) => (
                 <TableRow key={record.id}>
                   <TableCell className="font-mono text-xs">{record.number}</TableCell>
-                  <TableCell>{record.orderNumber}</TableCell>
+                  <TableCell>{record.orderNumber ?? record.referenceId ?? "Linked order"}</TableCell>
                   <TableCell>{record.reason}</TableCell>
                   <TableCell>{record.items}</TableCell>
                   <TableCell>{record.warehouse}</TableCell>
                   <TableCell>
-                    <Select value={record.status} onChange={(e) => updateStatus(record.id, e.target.value)} className="h-8 text-xs w-32">
-                      <option>Inspection</option>
-                      <option>Restocked</option>
-                      <option>Quarantine</option>
-                      <option>Disposed</option>
-                    </Select>
+                    <Badge>{record.status}</Badge>
                   </TableCell>
                   <TableCell>{record.date}</TableCell>
                   <TableCell>
                     <div className="flex justify-end">
-                      <Button variant="outline" size="icon" onClick={() => deleteReturn(record.id)}><Trash2 className="size-4" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => void approveReturn.mutate(record.id)}>Approve</Button>
+                      <Button variant="outline" size="icon" onClick={() => void rejectReturn.mutate(record.id)}><Trash2 className="size-4" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {!isLoading && filtered.length === 0 && (
                 <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No returns found</TableCell></TableRow>
               )}
             </TableBody>

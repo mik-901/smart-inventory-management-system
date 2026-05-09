@@ -1,72 +1,193 @@
 import { Router } from "express";
+import { z } from "zod";
 
-import { demoStore } from "../../data/demo-store.js";
-import { requirePermission } from "../../middleware/rbac.js";
+import { query, queryOne, transaction } from "../../db/pool.js";
+import { requireMinimumRole, requirePermission } from "../../middleware/rbac.js";
 import { validateBody } from "../../middleware/validate.js";
-import { returnSchema } from "../../validators/schemas.js";
-import { writeAudit } from "../../utils/audit.js";
-import type { AuthRequest } from "../../middleware/auth.js";
-import { pool, query } from "../../db/pool.js";
-import crypto from "node:crypto";
+import { adjustInventory } from "../../services/inventory.service.js";
+import type { AuthRequest } from "../../types/index.js";
+import { asyncHandler, created, ok, paginated } from "../../utils/http.js";
+import { parseListQuery } from "../../utils/pagination.js";
+import { dateOnly, toInteger } from "../../utils/serializers.js";
 
 export const returnsRouter = Router();
 
-returnsRouter.get("/", requirePermission("orders:read"), async (_req, res) => {
-  if (pool) {
-    try {
-      const rows = await query("SELECT * FROM returns ORDER BY created_at DESC");
-      return res.json({ 
-        data: rows.map(r => ({
-          ...r,
-          id: r.id,
-          number: r.return_number,
-          date: new Date(r.created_at).toISOString().split('T')[0]
-        }))
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to fetch returns" });
-    }
-  }
-  res.json({ data: demoStore.returns });
+const returnItemSchema = z.object({
+  productId: z.string().uuid().optional(),
+  product_id: z.string().uuid().optional(),
+  quantity: z.coerce.number().int().positive(),
+  condition: z.enum(["good", "damaged", "expired"]).default("good"),
+  action: z.enum(["restock", "discard", "return_to_supplier"]).default("restock")
 });
 
-returnsRouter.post("/", requirePermission("orders:write"), validateBody(returnSchema), async (req: AuthRequest, res) => {
-  const { reason, status, items } = req.body;
-  const num = `RT-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+const returnCreateSchema = z.object({
+  referenceType: z.enum(["sale", "purchase"]).optional(),
+  reference_type: z.enum(["sale", "purchase"]).optional(),
+  referenceId: z.string().uuid().optional().nullable(),
+  reference_id: z.string().uuid().optional().nullable(),
+  warehouseId: z.string().uuid().optional(),
+  warehouse_id: z.string().uuid().optional(),
+  reason: z.string().min(3),
+  items: z.array(returnItemSchema).min(1)
+});
 
-  if (pool) {
-    try {
-      const rows = await query(`
-        INSERT INTO returns (return_number, reason, status, total_items)
-        VALUES ($1, $2, $3, $4)
-        RETURNING *
-      `, [num, reason, status || "Inspection", items?.length || 0]);
-      
-      const record = rows[0];
-      writeAudit(req, "created return", record.return_number);
-      return res.status(201).json({ 
-        data: {
-          ...record,
-          number: record.return_number,
-          date: new Date(record.created_at).toISOString().split('T')[0]
-        }
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to create return" });
-    }
-  }
+function returnNumber() {
+  return `RT-${new Date().getFullYear()}-${Math.floor(Date.now() % 900000)}`;
+}
 
-  const record = {
-    id: crypto.randomUUID(),
-    number: num,
-    status: status || "Inspection",
-    date: new Date().toISOString().slice(0, 10),
-    ...req.body,
-    items: req.body.items?.length || 0
+function mapReturn(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    returnNumber: row.return_number,
+    number: row.return_number,
+    referenceType: row.reference_type,
+    referenceId: row.reference_id,
+    warehouseId: row.warehouse_id,
+    warehouse: row.warehouse_name,
+    reason: row.reason,
+    status: row.status,
+    totalItems: toInteger(row.total_items),
+    items: toInteger(row.total_items),
+    processedBy: row.processed_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    date: dateOnly(row.created_at)
   };
-  demoStore.returns.unshift(record);
-  writeAudit(req, "created return", record.number);
-  res.status(201).json({ data: record });
-});
+}
+
+returnsRouter.get(
+  "/",
+  requirePermission("orders:read"),
+  asyncHandler(async (req, res) => {
+    const list = parseListQuery(req, "created_at");
+    const count = await queryOne<{ count: string }>("select count(*) from returns", []);
+    const rows = await query(
+      `select r.*, w.name as warehouse_name
+         from returns r
+         join warehouses w on w.id = r.warehouse_id
+        order by r.created_at desc
+        limit $1 offset $2`,
+      [list.limit, list.offset]
+    );
+    return paginated(res, rows.map(mapReturn), { page: list.page, limit: list.limit, total: toInteger(count?.count) });
+  })
+);
+
+returnsRouter.post(
+  "/",
+  requireMinimumRole("staff"),
+  validateBody(returnCreateSchema),
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const body = req.body as z.infer<typeof returnCreateSchema>;
+    const warehouseId = body.warehouseId ?? body.warehouse_id;
+    const referenceType = body.referenceType ?? body.reference_type;
+    if (!warehouseId || !referenceType) return res.status(400).json({ success: false, message: "referenceType and warehouseId are required" });
+
+    const createdReturn = await transaction(async (client) => {
+      const totalItems = body.items.reduce((sum, item) => sum + item.quantity, 0);
+      const ret = await client.query(
+        `insert into returns (return_number, reference_type, reference_id, warehouse_id, reason, status, total_items, processed_by)
+         values ($1, $2, $3, $4, $5, 'pending', $6, $7)
+         returning *`,
+        [returnNumber(), referenceType, body.referenceId ?? body.reference_id ?? null, warehouseId, body.reason, totalItems, req.user?.id ?? null]
+      );
+      for (const item of body.items) {
+        await client.query(
+          `insert into return_items (return_id, product_id, quantity, condition, action)
+           values ($1, $2, $3, $4, $5)`,
+          [ret.rows[0].id, item.productId ?? item.product_id, item.quantity, item.condition, item.action]
+        );
+      }
+      return ret.rows[0];
+    });
+    return created(res, mapReturn(createdReturn), "Return created");
+  })
+);
+
+returnsRouter.get(
+  "/:id",
+  requirePermission("orders:read"),
+  asyncHandler(async (req, res) => {
+    const ret = await queryOne(
+      `select r.*, w.name as warehouse_name
+         from returns r
+         join warehouses w on w.id = r.warehouse_id
+        where r.id::text = $1 or r.return_number = $1`,
+      [req.params.id]
+    );
+    if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
+    const items = await query(
+      `select ri.*, p.sku, p.name as product_name
+         from return_items ri
+         join products p on p.id = ri.product_id
+        where ri.return_id = $1`,
+      [ret.id]
+    );
+    return ok(res, { ...mapReturn(ret), items });
+  })
+);
+
+returnsRouter.patch(
+  "/:id/approve",
+  requireMinimumRole("manager"),
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const returnId = String(req.params.id);
+    const updated = await transaction(async (client) => {
+      const ret = await client.query("select * from returns where id = $1 for update", [returnId]);
+      if (ret.rowCount !== 1) throw new Error("Return not found");
+      if (ret.rows[0].status === "completed") return ret.rows[0];
+      const items = await client.query("select * from return_items where return_id = $1", [returnId]);
+      for (const item of items.rows) {
+        if (item.action === "restock") {
+          await adjustInventory(client, {
+            productId: item.product_id,
+            warehouseId: ret.rows[0].warehouse_id,
+            quantityDelta: Number(item.quantity),
+            movementType: "return",
+            movementQuantity: Number(item.quantity),
+            referenceId: returnId,
+            referenceType: "return",
+            notes: `Return ${ret.rows[0].return_number} restocked`,
+            userId: req.user?.id ?? null,
+            io: req.app.get("io")
+          });
+        } else if (item.action === "return_to_supplier") {
+          await adjustInventory(client, {
+            productId: item.product_id,
+            warehouseId: ret.rows[0].warehouse_id,
+            quantityDelta: -Number(item.quantity),
+            movementType: "return",
+            movementQuantity: Number(item.quantity),
+            referenceId: returnId,
+            referenceType: "return",
+            notes: `Return ${ret.rows[0].return_number} sent to supplier`,
+            userId: req.user?.id ?? null,
+            io: req.app.get("io")
+          });
+        } else {
+          await client.query(
+            `insert into stock_movements (product_id, warehouse_id, movement_type, quantity, reference_id, reference_type, notes, created_by)
+             values ($1, $2, 'damage', $3, $4, 'return', $5, $6)`,
+            [item.product_id, ret.rows[0].warehouse_id, item.quantity, returnId, `Return ${ret.rows[0].return_number} discarded`, req.user?.id ?? null]
+          );
+        }
+      }
+      const row = await client.query(
+        "update returns set status = 'completed', processed_by = $2 where id = $1 returning *",
+        [returnId, req.user?.id ?? null]
+      );
+      return row.rows[0];
+    });
+    return ok(res, mapReturn(updated), "Return approved");
+  })
+);
+
+returnsRouter.patch(
+  "/:id/reject",
+  requireMinimumRole("manager"),
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const row = await queryOne("update returns set status = 'rejected', processed_by = $2 where id = $1 returning *", [req.params.id, req.user?.id ?? null]);
+    if (!row) return res.status(404).json({ success: false, message: "Return not found" });
+    return ok(res, mapReturn(row), "Return rejected");
+  })
+);

@@ -6,8 +6,9 @@ export function validateBody(schema: ZodSchema) {
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(422).json({
-        error: "Validation failed",
-        details: parsed.error.flatten()
+        success: false,
+        message: "Validation failed",
+        errors: parsed.error.flatten()
       });
     }
 

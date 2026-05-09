@@ -8,30 +8,32 @@ import { ReorderWidget } from "@/components/dashboard/reorder-widget";
 import { StockTrendChart } from "@/components/dashboard/stock-trend-chart";
 import { WarehousePerformanceChart } from "@/components/dashboard/warehouse-performance-chart";
 import { AppShell } from "@/components/layout/app-shell";
-import { dashboardStats } from "@/lib/demo-data";
+import { useDashboard } from "@/hooks/useDashboard";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 
 export default function DashboardPage() {
+  const { data: dashboardStats } = useDashboard();
+
   return (
     <AppShell title="Dashboard" subtitle="Realtime command center for stock, revenue, orders, and warehouse health.">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <KpiCard title="Total Products" value={formatNumber(dashboardStats.totalProducts)} trend="+12 SKUs this month" icon={Package} />
+        <KpiCard title="Total Products" value={formatNumber(dashboardStats.totalProducts ?? 0)} trend="Live catalog count" icon={Package} />
         <KpiCard
           title="Total Stock Value"
-          value={formatCurrency(dashboardStats.totalStockValue)}
-          trend="+8.4% vs last month"
+          value={formatCurrency(dashboardStats.totalStockValue ?? 0)}
+          trend="Quantity × cost"
           icon={Boxes}
           tone="blue"
         />
         <KpiCard
           title="Low Stock Items"
-          value={formatNumber(dashboardStats.lowStockItems)}
-          trend="2 need purchase review"
+          value={formatNumber(dashboardStats.lowStockItems ?? dashboardStats.lowStockCount ?? 0)}
+          trend="Below reorder point"
           icon={AlertTriangle}
           tone="amber"
         />
-        <KpiCard title="Orders Today" value={formatNumber(dashboardStats.ordersToday)} trend="94% on-time dispatch" icon={ShoppingCart} tone="emerald" />
-        <KpiCard title="Revenue" value={formatCurrency(dashboardStats.revenue)} trend="+14.7% today" icon={IndianRupee} tone="rose" />
+        <KpiCard title="Orders Today" value={formatNumber(dashboardStats.ordersToday ?? 0)} trend="PO + SO count" icon={ShoppingCart} tone="emerald" />
+        <KpiCard title="Revenue" value={formatCurrency(dashboardStats.revenue ?? dashboardStats.revenueToday ?? 0)} trend="Confirmed sales today" icon={IndianRupee} tone="rose" />
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">

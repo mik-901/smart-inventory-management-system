@@ -6,12 +6,14 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { notifications } from "@/lib/demo-data";
+import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/hooks/useNotifications";
 
 export function NotificationCenter() {
   const [open, setOpen] = useState(false);
-  const [read, setRead] = useState<string[]>(notifications.filter((item) => item.read).map((item) => item.id));
-  const unreadCount = useMemo(() => notifications.filter((item) => !read.includes(item.id)).length, [read]);
+  const { data: notifications, refetch } = useNotifications();
+  const markRead = useMarkNotificationRead(refetch);
+  const markAllRead = useMarkAllNotificationsRead(refetch);
+  const unreadCount = useMemo(() => notifications.filter((item) => !item.read && !item.isRead).length, [notifications]);
 
   return (
     <div className="relative">
@@ -30,7 +32,7 @@ export function NotificationCenter() {
               <p className="text-sm font-semibold">Notification Center</p>
               <p className="text-xs text-muted-foreground">{unreadCount} unread alerts</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setRead(notifications.map((item) => item.id))}>
+            <Button variant="ghost" size="sm" onClick={() => void markAllRead.mutate()}>
               <CheckCheck />
               Mark read
             </Button>
@@ -40,11 +42,11 @@ export function NotificationCenter() {
               <button
                 key={item.id}
                 className="flex w-full flex-col gap-2 border-b p-4 text-left transition-colors hover:bg-muted/50"
-                onClick={() => setRead((current) => Array.from(new Set([...current, item.id])))}
+                onClick={() => void markRead.mutate(item.id)}
               >
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-medium">{item.title}</p>
-                  {!read.includes(item.id) ? <Badge variant="warning">New</Badge> : null}
+                  {!item.read && !item.isRead ? <Badge variant="warning">New</Badge> : null}
                 </div>
                 <p className="text-xs text-muted-foreground">{item.message}</p>
                 <p className="text-[11px] text-muted-foreground">{item.time}</p>

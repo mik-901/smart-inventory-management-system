@@ -12,22 +12,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { users as initialUsers } from "@/lib/demo-data";
+import { useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/hooks/useUsers";
 import type { AppUser, UserRole } from "@/types";
 
 const roleLabel: Record<UserRole, string> = {
-  SUPER_ADMIN: "Super Admin",
-  MANAGER: "Manager",
-  WAREHOUSE_STAFF: "Warehouse Staff",
-  VIEWER: "Viewer"
+  admin: "Admin",
+  manager: "Manager",
+  staff: "Warehouse Staff",
+  viewer: "Viewer"
 };
 
 export default function UsersPage() {
-  const [rows, setRows] = useState<AppUser[]>(initialUsers);
   const [searchQuery, setSearchQuery] = useState("");
+  const { data: rows, refetch, isLoading } = useUsers({ search: searchQuery });
+  const createUser = useCreateUser(refetch);
+  const updateUser = useUpdateUser(refetch);
+  const removeUser = useDeleteUser(refetch);
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<UserRole>("VIEWER");
+  const [inviteRole, setInviteRole] = useState<UserRole>("viewer");
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return rows;
@@ -35,12 +38,11 @@ export default function UsersPage() {
     return rows.filter((u) => [u.name, u.email, u.role].join(" ").toLowerCase().includes(q));
   }, [searchQuery, rows]);
 
-  const updateRole = (id: string, role: UserRole) => {
-    setRows((current) => current.map((user) => (user.id === id ? { ...user, role } : user)));
-    toast.success("Role updated");
+  const updateRole = async (id: string, role: UserRole) => {
+    await updateUser.mutate(id, { role });
   };
 
-  const inviteUser = () => {
+  const inviteUser = async () => {
     if (!inviteName.trim() || !inviteEmail.trim()) {
       toast.error("Please enter name and email");
       return;
@@ -49,35 +51,24 @@ export default function UsersPage() {
       toast.error("A user with this email already exists");
       return;
     }
-    const newUser: AppUser = {
-      id: `usr-${crypto.randomUUID().slice(0, 8)}`,
+    await createUser.mutate({
       name: inviteName,
       email: inviteEmail,
       role: inviteRole,
-      lastLogin: "Never",
-      status: "Invited"
-    };
-    setRows((cur) => [...cur, newUser]);
+      password: "TempPass123"
+    });
     setInviteName("");
     setInviteEmail("");
-    setInviteRole("VIEWER");
-    toast.success(`Invitation sent to ${inviteEmail}`);
+    setInviteRole("viewer");
   };
 
-  const toggleStatus = (id: string) => {
-    setRows((cur) =>
-      cur.map((u) => {
-        if (u.id !== id) return u;
-        const next = u.status === "Active" ? "Suspended" : "Active";
-        toast.success(`${u.name} is now ${next}`);
-        return { ...u, status: next as AppUser["status"] };
-      })
-    );
+  const toggleStatus = async (user: AppUser) => {
+    await updateUser.mutate(user.id, { isActive: user.status !== "Active" } as Partial<AppUser>);
   };
 
-  const deleteUser = (id: string) => {
+  const deleteUser = async (id: string) => {
     const u = rows.find((r) => r.id === id);
-    setRows((cur) => cur.filter((r) => r.id !== id));
+    await removeUser.mutate(id);
     toast.success(`${u?.name ?? "User"} removed`);
   };
 
@@ -106,7 +97,7 @@ export default function UsersPage() {
                 ))}
               </Select>
             </div>
-            <Button onClick={inviteUser}>
+            <Button onClick={() => void inviteUser()}>
               <UserPlus />
               Send Invite
             </Button>
@@ -162,26 +153,29 @@ export default function UsersPage() {
                   <TableCell className="font-medium">{user.name}</TableCell>
                   <TableCell>{user.email}</TableCell>
                   <TableCell>
-                    <Select value={user.role} onChange={(event) => updateRole(user.id, event.target.value as UserRole)}>
+                    <Select value={user.role} onChange={(event) => void updateRole(user.id, event.target.value as UserRole)}>
                       {Object.entries(roleLabel).map(([value, label]) => (
                         <option key={value} value={value}>{label}</option>
                       ))}
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <button type="button" onClick={() => toggleStatus(user.id)} className="cursor-pointer">
+                    <button type="button" onClick={() => void toggleStatus(user)} className="cursor-pointer">
                       <Badge variant={user.status === "Active" ? "success" : user.status === "Invited" ? "secondary" : "warning"}>{user.status}</Badge>
                     </button>
                   </TableCell>
                   <TableCell>{user.lastLogin}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => deleteUser(user.id)}>
+                    <Button variant="ghost" size="icon" onClick={() => void deleteUser(user.id)}>
                       <Trash2 className="size-4 text-destructive" />
                     </Button>
                   </TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {isLoading && (
+                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading users...</TableCell></TableRow>
+              )}
+              {!isLoading && filtered.length === 0 && (
                 <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No users match your search.</TableCell></TableRow>
               )}
             </TableBody>

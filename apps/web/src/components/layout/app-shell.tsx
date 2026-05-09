@@ -11,21 +11,22 @@ import { NotificationCenter } from "@/components/layout/notification-center";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useInventory } from "@/hooks/useInventory";
+import { useProducts } from "@/hooks/useProducts";
+import { useWarehouses } from "@/hooks/useWarehouses";
 import { useAuth, canAccess } from "@/lib/auth-context";
 import { navigationItems } from "@/lib/navigation";
-import { products, inventory, orders, warehouses } from "@/lib/demo-data";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { label: string; sub: string; href: string; type: string };
 
-function buildSearchIndex(): SearchResult[] {
+function buildSearchIndex(products: any[], inventory: any[], warehouses: any[]): SearchResult[] {
   const results: SearchResult[] = [];
   products.forEach((p) => {
     results.push({ label: p.name, sub: p.sku, href: "/products", type: "Product" });
     results.push({ label: p.sku, sub: p.name, href: "/products", type: "SKU" });
     if (p.barcode) results.push({ label: p.barcode, sub: p.name, href: "/products", type: "Barcode" });
   });
-  orders.forEach((o) => results.push({ label: o.number, sub: `${o.type} · ${o.party}`, href: "/orders", type: "Order" }));
   warehouses.forEach((w) => results.push({ label: w.name, sub: `${w.code} · ${w.city}`, href: "/warehouses", type: "Warehouse" }));
   inventory.forEach((i) => results.push({ label: `${i.sku} @ ${i.warehouse}`, sub: `Available: ${i.available}`, href: "/inventory", type: "Inventory" }));
   return results;
@@ -36,13 +37,16 @@ export function AppShell({ children, title, subtitle }: { children: React.ReactN
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { data: products } = useProducts();
+  const { data: inventory } = useInventory();
+  const { data: warehouses } = useWarehouses();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  const searchIndex = useMemo(() => buildSearchIndex(), []);
+  const searchIndex = useMemo(() => buildSearchIndex(products, inventory, warehouses), [products, inventory, warehouses]);
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
@@ -71,10 +75,10 @@ export function AppShell({ children, title, subtitle }: { children: React.ReactN
   }, [isLoading, isAuthenticated, router]);
 
   const visibleItems = useMemo(() => {
-    if (!user) return navigationItems.filter((item) => !item.secondary);
+    if (!user) return navigationItems;
     return navigationItems.filter((item) => {
       const area = item.href.split("?")[0].replace("/", "") || "dashboard";
-      return !item.secondary && canAccess(user.role, area);
+      return canAccess(user.role, area);
     });
   }, [user]);
 

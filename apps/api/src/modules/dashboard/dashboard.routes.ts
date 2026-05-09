@@ -1,70 +1,96 @@
 import { Router } from "express";
 
-import { demoStore } from "../../data/demo-store.js";
+import { query } from "../../db/pool.js";
 import { requirePermission } from "../../middleware/rbac.js";
-import { pool, query } from "../../db/pool.js";
+import { asyncHandler, ok } from "../../utils/http.js";
+import { toInteger, toNumber } from "../../utils/serializers.js";
 
 export const dashboardRouter = Router();
 
-dashboardRouter.get("/", requirePermission("dashboard:read"), async (_req, res) => {
-  if (pool) {
-    try {
-      const [productsCount] = await query("SELECT COUNT(*) as count FROM products");
-      const [stockVal] = await query(`
-        SELECT COALESCE(SUM(i.quantity * p.cost_price), 0) as total
-        FROM inventory i
-        JOIN products p ON i.product_id = p.id
-      `);
-      const [lowStock] = await query(`
-        SELECT COUNT(*) as count FROM (
-          SELECT p.id 
-          FROM products p 
-          LEFT JOIN inventory i ON p.id = i.product_id 
-          GROUP BY p.id, p.reorder_level 
-          HAVING COALESCE(SUM(i.quantity), 0) <= p.reorder_level
-        ) sub
-      `);
-      const [ordersToday] = await query("SELECT COUNT(*) as count FROM orders WHERE created_at >= CURRENT_DATE");
-      const [revenue] = await query("SELECT COALESCE(SUM(total_amount), 0) as total FROM orders WHERE type = 'SALE'");
+dashboardRouter.get(
+  ["/", "/stats"],
+  requirePermission("dashboard:read"),
+  asyncHandler(async (_req, res) => {
+    const [counts, lowStockRows, todayRows, topMovingProducts, stockValueByWarehouse, recentMovements] = await Promise.all([
+      query<{
+        total_products: string;
+        total_warehouses: string;
+        total_stock_value: string;
+      }>(
+        `select
+           (select count(*) from products where is_active = true) as total_products,
+           (select count(*) from warehouses where is_active = true) as total_warehouses,
+           (select coalesce(sum(i.quantity * p.cost_price), 0)
+              from inventory i
+              join products p on p.id = i.product_id
+             where p.is_active = true) as total_stock_value`
+      ),
+      query<{ low_stock_count: string }>(
+        `select count(*) as low_stock_count
+           from (
+             select p.id, p.reorder_point, coalesce(sum(i.available_quantity), 0) as available
+             from products p
+             left join inventory i on i.product_id = p.id
+             where p.is_active = true
+             group by p.id
+             having coalesce(sum(i.available_quantity), 0) <= p.reorder_point
+           ) low_stock`
+      ),
+      query<{ orders_today: string; revenue_today: string }>(
+        `select
+           (select count(*) from purchase_orders where order_date = current_date)
+           + (select count(*) from sales_orders where order_date = current_date) as orders_today,
+           (select coalesce(sum(total_amount), 0)
+              from sales_orders
+             where order_date = current_date
+               and status in ('confirmed', 'shipped', 'delivered')) as revenue_today`
+      ),
+      query(
+        `select p.id, p.sku, p.name, sum(sm.quantity)::int as quantity
+           from stock_movements sm
+           join products p on p.id = sm.product_id
+          where sm.created_at >= now() - interval '30 days'
+          group by p.id
+          order by quantity desc
+          limit 8`
+      ),
+      query(
+        `select w.id, w.name, coalesce(sum(i.quantity * p.cost_price), 0) as value
+           from warehouses w
+           left join inventory i on i.warehouse_id = w.id
+           left join products p on p.id = i.product_id
+          where w.is_active = true
+          group by w.id
+          order by value desc`
+      ),
+      query(
+        `select sm.id, sm.movement_type, sm.quantity, sm.reference_type, sm.reference_id, sm.created_at,
+                p.sku, p.name as product_name, w.name as warehouse_name
+           from stock_movements sm
+           join products p on p.id = sm.product_id
+           join warehouses w on w.id = sm.warehouse_id
+          order by sm.created_at desc
+          limit 12`
+      )
+    ]);
 
-      const stockTrend = [
-        { date: "Apr 26", inward: 1280, outward: 940, stock: 18400 },
-        { date: "Apr 27", inward: 1120, outward: 1020, stock: 18500 },
-        { date: "Apr 28", inward: 1480, outward: 1180, stock: 18800 },
-        { date: "Apr 29", inward: 980, outward: 1220, stock: 18560 },
-        { date: "Apr 30", inward: 1670, outward: 1300, stock: 18930 },
-        { date: "May 01", inward: 1390, outward: 980, stock: 19340 },
-        { date: "May 02", inward: 1520, outward: 1100, stock: 19760 }
-      ];
+    const countRow = counts[0] ?? { total_products: "0", total_warehouses: "0", total_stock_value: "0" };
+    const lowStockCount = toInteger(lowStockRows[0]?.low_stock_count);
+    const today = todayRows[0] ?? { orders_today: "0", revenue_today: "0" };
 
-      return res.json({
-        data: {
-          totalProducts: parseInt(String(productsCount?.count || "0")),
-          totalStockValue: parseFloat(String(stockVal?.total || "0")),
-          lowStockItems: parseInt(String(lowStock?.count || "0")),
-          ordersToday: parseInt(String(ordersToday?.count || "0")),
-          revenue: parseFloat(String(revenue?.total || "0")),
-          stockTrend
-        }
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to load dashboard data" });
-    }
-  }
-
-  res.json({
-    data: {
-      ...demoStore.dashboard,
-      stockTrend: [
-        { date: "Apr 26", inward: 1280, outward: 940, stock: 18400 },
-        { date: "Apr 27", inward: 1120, outward: 1020, stock: 18500 },
-        { date: "Apr 28", inward: 1480, outward: 1180, stock: 18800 },
-        { date: "Apr 29", inward: 980, outward: 1220, stock: 18560 },
-        { date: "Apr 30", inward: 1670, outward: 1300, stock: 18930 },
-        { date: "May 01", inward: 1390, outward: 980, stock: 19340 },
-        { date: "May 02", inward: 1520, outward: 1100, stock: 19760 }
-      ]
-    }
-  });
-});
+    return ok(res, {
+      totalProducts: toInteger(countRow.total_products),
+      warehouses: toInteger(countRow.total_warehouses),
+      totalWarehouses: toInteger(countRow.total_warehouses),
+      lowStockCount,
+      lowStockItems: lowStockCount,
+      ordersToday: toInteger(today.orders_today),
+      revenueToday: toNumber(today.revenue_today),
+      revenue: toNumber(today.revenue_today),
+      totalStockValue: toNumber(countRow.total_stock_value),
+      topMovingProducts: topMovingProducts.map((row) => ({ ...row, quantity: toInteger(row.quantity) })),
+      stockValueByWarehouse: stockValueByWarehouse.map((row) => ({ ...row, value: toNumber(row.value) })),
+      recentMovements
+    });
+  })
+);

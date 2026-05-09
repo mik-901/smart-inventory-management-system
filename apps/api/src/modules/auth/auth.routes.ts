@@ -1,20 +1,28 @@
 import { Router } from "express";
-import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { SignJWT, jwtVerify } from "jose";
+import { jwtVerify, SignJWT } from "jose";
 
 import { env } from "../../config/env.js";
-import { demoStore, type Role } from "../../data/demo-store.js";
+import { authenticate } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
+import { query, queryOne } from "../../db/pool.js";
+import { asyncHandler, created, ok } from "../../utils/http.js";
 import { loginSchema, registerSchema } from "../../validators/schemas.js";
-import type { AuthRequest } from "../../middleware/auth.js";
-import { pool, query } from "../../db/pool.js";
+import type { AuthRequest, Role } from "../../types/index.js";
 
 const scryptAsync = promisify(scrypt);
+const ACCESS_SECRET = new TextEncoder().encode(env.JWT_SECRET);
+const REFRESH_SECRET = new TextEncoder().encode(env.JWT_REFRESH_SECRET);
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-const JWT_SECRET = new TextEncoder().encode(env.JWT_SECRET);
+type DbUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  password_hash: string;
+  is_active: boolean;
+};
 
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
@@ -26,217 +34,139 @@ async function verifyPassword(password: string, hash: string): Promise<boolean> 
   const [salt, key] = hash.split(":");
   if (!salt || !key) return false;
   const derived = (await scryptAsync(password, salt, 64)) as Buffer;
-  return timingSafeEqual(Buffer.from(key, "hex"), derived);
+  const keyBuffer = Buffer.from(key, "hex");
+  if (keyBuffer.length !== derived.length) return false;
+  return timingSafeEqual(keyBuffer, derived);
 }
 
-async function createTokens(user: { id: string; email: string; role: Role; name: string }) {
+async function createTokens(user: Pick<DbUser, "id" | "email" | "role" | "name">) {
   const accessToken = await new SignJWT({
-    sub: user.id,
     email: user.email,
     role: user.role,
     name: user.name
   })
     .setProtectedHeader({ alg: "HS256" })
+    .setSubject(user.id)
     .setIssuedAt()
-    .setExpirationTime("24h")
+    .setExpirationTime(env.JWT_EXPIRES_IN)
     .setAudience(env.JWT_AUDIENCE)
     .setIssuer(env.JWT_ISSUER ?? "smart-inventory-api")
-    .sign(JWT_SECRET);
+    .sign(ACCESS_SECRET);
 
-  const refreshToken = await new SignJWT({ sub: user.id, type: "refresh" })
+  const refreshToken = await new SignJWT({ type: "refresh" })
     .setProtectedHeader({ alg: "HS256" })
+    .setSubject(user.id)
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime(env.JWT_REFRESH_EXPIRES_IN)
     .setAudience(env.JWT_AUDIENCE)
     .setIssuer(env.JWT_ISSUER ?? "smart-inventory-api")
-    .sign(JWT_SECRET);
+    .sign(REFRESH_SECRET);
 
   return { accessToken, refreshToken };
 }
 
-// ── routes ───────────────────────────────────────────────────────────────────
+function publicUser(user: Pick<DbUser, "id" | "name" | "email" | "role">) {
+  return { id: user.id, name: user.name, email: user.email, role: user.role };
+}
 
 export const authRouter = Router();
 
-// Register
-authRouter.post("/register", validateBody(registerSchema), async (req, res) => {
-  try {
+authRouter.post(
+  "/register",
+  validateBody(registerSchema),
+  asyncHandler(async (req, res) => {
     const { name, email, password } = req.body as { name: string; email: string; password: string };
     const passwordHash = await hashPassword(password);
 
-    if (pool) {
-      const existing = await query("SELECT id FROM users WHERE email = $1", [email]);
-      if (existing.length > 0) {
-        return res.status(409).json({ error: "An account with this email already exists" });
-      }
-
-      const rows = await query(
-        "INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role",
-        [name, email, passwordHash, "VIEWER"]
-      );
-      const user = rows[0];
-      const tokens = await createTokens({ id: user.id, email: user.email, role: user.role as Role, name: user.name });
-
-      return res.status(201).json({
-        data: { user, ...tokens }
-      });
+    const existing = await queryOne("select id from users where lower(email) = lower($1)", [email]);
+    if (existing) {
+      return res.status(409).json({ success: false, message: "An account with this email already exists" });
     }
 
-    // Fallback to demoStore
-    const exists = demoStore.users.find((u) => u.email === email);
-    if (exists) return res.status(409).json({ error: "An account with this email already exists" });
+    const user = await queryOne<DbUser>(
+      `insert into users (name, email, password_hash, role)
+       values ($1, lower($2), $3, 'viewer')
+       returning id, name, email, role, password_hash, is_active`,
+      [name, email, passwordHash]
+    );
 
-    const user = {
-      id: `usr-${randomBytes(4).toString("hex")}`,
-      name,
-      email,
-      role: "VIEWER" as Role,
-      passwordHash,
-      lastLogin: new Date().toISOString(),
-      status: "Active"
-    };
-    demoStore.users.push(user);
+    if (!user) throw new Error("Unable to create user");
     const tokens = await createTokens(user);
+    return created(res, { user: publicUser(user), ...tokens }, "Registration successful");
+  })
+);
 
-    return res.status(201).json({
-      data: {
-        user: { id: user.id, name: user.name, email: user.email, role: user.role },
-        ...tokens
-      }
-    });
-  } catch (error: any) {
-    console.error("REGISTER ERROR:", error);
-    return res.status(500).json({ error: "Registration failed", detail: error?.message ?? String(error) });
-  }
-});
-
-// Login
-authRouter.post("/login", validateBody(loginSchema), async (req, res) => {
-  try {
+authRouter.post(
+  "/login",
+  validateBody(loginSchema),
+  asyncHandler(async (req, res) => {
     const { email, password } = req.body as { email: string; password: string };
+    const user = await queryOne<DbUser>(
+      "select id, name, email, role, password_hash, is_active from users where lower(email) = lower($1)",
+      [email]
+    );
 
-    if (pool) {
-      const rows = await query("SELECT id, name, email, role, password_hash FROM users WHERE email = $1", [email]);
-      if (rows.length === 0) return res.status(401).json({ error: "Invalid email or password" });
-
-      const user = rows[0];
-      if (user.password_hash) {
-        const valid = await verifyPassword(password, user.password_hash);
-        if (!valid) return res.status(401).json({ error: "Invalid email or password" });
-      } else {
-        if (password !== "inventory123") return res.status(401).json({ error: "Invalid email or password" });
-      }
-
-      await query("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
-
-      const tokens = await createTokens({ id: user.id, email: user.email, role: user.role as Role, name: user.name });
-      return res.json({
-        data: {
-          user: { id: user.id, name: user.name, email: user.email, role: user.role },
-          ...tokens
-        }
-      });
+    if (!user || !user.is_active || !(await verifyPassword(password, user.password_hash))) {
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
-    // Fallback to demoStore
-    const user = demoStore.users.find((u) => u.email === email);
-    if (!user) return res.status(401).json({ error: "Invalid email or password" });
+    await query("update users set last_login_at = now() where id = $1", [user.id]);
+    const tokens = await createTokens(user);
+    return ok(res, { user: publicUser(user), ...tokens }, "Login successful");
+  })
+);
 
-    if (user.passwordHash) {
-      const valid = await verifyPassword(password, user.passwordHash);
-      if (!valid) return res.status(401).json({ error: "Invalid email or password" });
-    } else {
-      if (password !== "inventory123") return res.status(401).json({ error: "Invalid email or password" });
-    }
-
-    user.lastLogin = new Date().toISOString();
-    const tokens = await createTokens({ id: user.id, email: user.email, role: user.role as Role, name: user.name });
-
-    return res.json({
-      data: {
-        user: { id: user.id, name: user.name, email: user.email, role: user.role },
-        ...tokens
-      }
-    });
-  } catch (error: any) {
-    console.error("LOGIN ERROR:", error);
-    return res.status(500).json({ error: "Login failed", detail: error?.message ?? String(error) });
-  }
+authRouter.post("/logout", (_req, res) => {
+  return ok(res, { loggedOut: true }, "Logout successful");
 });
 
-// Get current user
-authRouter.get("/me", async (req: AuthRequest, res) => {
-  const header = req.headers.authorization;
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token) return res.status(401).json({ error: "Missing bearer token" });
-
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, {
-      audience: env.JWT_AUDIENCE,
-      issuer: env.JWT_ISSUER ?? "smart-inventory-api"
-    });
-
-    if (pool) {
-      const rows = await query("SELECT id, name, email, role, last_login_at FROM users WHERE id = $1", [payload.sub]);
-      if (rows.length === 0) return res.status(401).json({ error: "User not found" });
-      const user = rows[0];
-      return res.json({
-        data: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          lastLogin: user.last_login_at,
-          status: "Active"
-        }
-      });
-    }
-
-    const user = demoStore.users.find((u) => u.id === payload.sub);
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    return res.json({
-      data: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        lastLogin: user.lastLogin,
-        status: user.status
-      }
-    });
-  } catch {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-});
-
-// Refresh token
-authRouter.post("/refresh", async (req, res) => {
-  try {
+authRouter.post(
+  "/refresh",
+  asyncHandler(async (req, res) => {
     const { refreshToken } = req.body as { refreshToken?: string };
-    if (!refreshToken) return res.status(400).json({ error: "Refresh token is required" });
-
-    const { payload } = await jwtVerify(refreshToken, JWT_SECRET, {
-      audience: env.JWT_AUDIENCE,
-      issuer: env.JWT_ISSUER ?? "smart-inventory-api"
-    });
-
-    if (payload.type !== "refresh") return res.status(401).json({ error: "Invalid token type" });
-
-    if (pool) {
-      const rows = await query("SELECT id, name, email, role FROM users WHERE id = $1", [payload.sub]);
-      if (rows.length === 0) return res.status(401).json({ error: "User not found" });
-      const user = rows[0];
-      const tokens = await createTokens({ id: user.id, email: user.email, role: user.role as Role, name: user.name });
-      return res.json({ data: tokens });
+    if (!refreshToken) {
+      return res.status(400).json({ success: false, message: "Refresh token is required" });
     }
 
-    const user = demoStore.users.find((u) => u.id === payload.sub);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    try {
+      const { payload } = await jwtVerify(refreshToken, REFRESH_SECRET, {
+        audience: env.JWT_AUDIENCE,
+        issuer: env.JWT_ISSUER ?? "smart-inventory-api"
+      });
 
-    const tokens = await createTokens({ id: user.id, email: user.email, role: user.role as Role, name: user.name });
-    return res.json({ data: tokens });
-  } catch {
-    return res.status(401).json({ error: "Invalid or expired refresh token" });
-  }
-});
+      if (payload.type !== "refresh") {
+        return res.status(401).json({ success: false, message: "Invalid token type" });
+      }
+
+      const user = await queryOne<DbUser>(
+        "select id, name, email, role, password_hash, is_active from users where id = $1 and is_active = true",
+        [payload.sub]
+      );
+      if (!user) return res.status(401).json({ success: false, message: "User not found" });
+
+      const tokens = await createTokens(user);
+      return ok(res, { user: publicUser(user), ...tokens }, "Token refreshed");
+    } catch {
+      return res.status(401).json({ success: false, message: "Invalid or expired refresh token" });
+    }
+  })
+);
+
+authRouter.get(
+  "/me",
+  authenticate,
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const user = await queryOne<
+      Pick<DbUser, "id" | "name" | "email" | "role"> & {
+        last_login_at: Date | null;
+        created_at: Date;
+      }
+    >(
+      "select id, name, email, role, last_login_at, created_at from users where id = $1 and is_active = true",
+      [req.user?.id]
+    );
+
+    if (!user) return res.status(401).json({ success: false, message: "User not found" });
+    return ok(res, { ...publicUser(user), lastLogin: user.last_login_at, createdAt: user.created_at });
+  })
+);

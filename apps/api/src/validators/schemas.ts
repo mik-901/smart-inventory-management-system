@@ -40,7 +40,7 @@ export const returnSchema = z.object({
 });
 
 export const userRoleSchema = z.object({
-  role: z.enum(["SUPER_ADMIN", "MANAGER", "WAREHOUSE_STAFF", "VIEWER"])
+  role: z.enum(["admin", "manager", "staff", "viewer"])
 });
 
 export const loginSchema = z.object({

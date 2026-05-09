@@ -3,9 +3,17 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { warehousePerformance } from "@/lib/demo-data";
+import { useWarehouses } from "@/hooks/useWarehouses";
 
 export function WarehousePerformanceChart() {
+  const { data: warehouses } = useWarehouses();
+  const warehousePerformance = warehouses.map((warehouse) => ({
+    name: warehouse.city || warehouse.name,
+    utilization: warehouse.utilization,
+    orders: warehouse.ordersToday,
+    value: warehouse.stockValue
+  }));
+
   return (
     <Card className="min-h-[380px]">
       <CardHeader>
@@ -26,7 +34,6 @@ export function WarehousePerformanceChart() {
               }}
             />
             <Bar dataKey="utilization" radius={[6, 6, 0, 0]} fill="#14b8a6" />
-            <Bar dataKey="accuracy" radius={[6, 6, 0, 0]} fill="#38bdf8" />
             <Bar dataKey="orders" radius={[6, 6, 0, 0]} fill="#f59e0b" />
           </BarChart>
         </ResponsiveContainer>

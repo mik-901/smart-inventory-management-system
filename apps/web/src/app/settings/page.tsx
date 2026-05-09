@@ -10,8 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-
-const STORAGE_KEY = "sims_settings";
+import { apiClient } from "@/lib/api";
 
 interface Settings {
   companyName: string;
@@ -42,24 +41,32 @@ const defaults: Settings = {
 };
 
 function loadSettings(): Settings {
-  if (typeof window === "undefined") return defaults;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
-  } catch {
-    return defaults;
-  }
+  return defaults;
 }
 
 export default function SettingsPage() {
   const [s, setS] = useState<Settings>(defaults);
-  useEffect(() => setS(loadSettings()), []);
+  useEffect(() => {
+    void apiClient.get<Record<string, { value: any }>>("/api/settings").then((settings) => {
+      setS((current) => ({
+        ...current,
+        companyName: settings.company?.value?.name ?? current.companyName,
+        currency: settings.localization?.value?.currency ?? current.currency,
+        lowStockChannel: settings.alerts?.value?.emailLowStock ? "email_push" : current.lowStockChannel
+      }));
+    }).catch(() => setS(loadSettings()));
+  }, []);
 
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setS((prev) => ({ ...prev, [key]: value }));
 
-  const saveSection = (label: string) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  const saveSection = async (label: string) => {
+    await apiClient.put("/api/settings", {
+      company: { name: s.companyName, gstId: s.gstId, emailFrom: s.emailFrom },
+      localization: { currency: s.currency, taxRate: s.taxRate, timezone: "Asia/Kolkata" },
+      alerts: { lowStockChannel: s.lowStockChannel, reportTime: s.reportTime, aiApprovals: s.aiApprovals },
+      security: { sessionTimeoutHours: s.sessionTimeout, accessReviewDays: s.accessReview }
+    });
     toast.success(`${label} saved`);
   };
   return (
@@ -98,7 +105,7 @@ export default function SettingsPage() {
                 <Input value={s.taxRate} onChange={(e) => update("taxRate", e.target.value)} />
               </div>
             </div>
-            <Button onClick={() => saveSection("Company settings")}>
+            <Button onClick={() => void saveSection("Company settings")}>
               <Save />
               Save Profile
             </Button>
@@ -142,7 +149,7 @@ export default function SettingsPage() {
                 <Input value={s.emailFrom} onChange={(e) => update("emailFrom", e.target.value)} />
               </div>
             </div>
-            <Button onClick={() => saveSection("Notification settings")}>
+            <Button onClick={() => void saveSection("Notification settings")}>
               <Save />
               Save Alerts
             </Button>
@@ -166,7 +173,7 @@ export default function SettingsPage() {
                 <option value="dark">Dark</option>
               </Select>
             </div>
-            <Button variant="secondary" onClick={() => saveSection("Theme preference")}>
+            <Button variant="secondary" onClick={() => void saveSection("Theme preference")}>
               <Save />
               Save Theme
             </Button>
@@ -200,7 +207,7 @@ export default function SettingsPage() {
                 </Select>
               </div>
             </div>
-            <Button variant="secondary" onClick={() => saveSection("Security settings")}>
+            <Button variant="secondary" onClick={() => void saveSection("Security settings")}>
               <Save />
               Save Security
             </Button>

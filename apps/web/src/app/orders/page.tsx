@@ -12,7 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { orders as initialOrders, products, warehouses } from "@/lib/demo-data";
+import { useApiQuery } from "@/hooks/useApiResource";
+import { useProducts } from "@/hooks/useProducts";
+import { useWarehouses } from "@/hooks/useWarehouses";
+import { apiClient, getApi } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import type { Order } from "@/types";
 
@@ -25,15 +28,15 @@ const nextStatus: Record<string, string> = {
   Cancelled: "Cancelled"
 };
 
-let orderCounter = initialOrders.length + 1;
-
 export default function OrdersPage() {
-  const [rows, setRows] = useState<Order[]>(initialOrders);
+  const { data: rows, refetch, isLoading } = useApiQuery(() => getApi<Order[]>("/api/orders"), [], { initialData: [] });
+  const { data: products } = useProducts();
+  const { data: warehouses } = useWarehouses();
   const [type, setType] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [formType, setFormType] = useState<"Purchase" | "Sales" | "Transfer">("Purchase");
-  const [formWarehouse, setFormWarehouse] = useState(warehouses[0].name);
-  const [formProduct, setFormProduct] = useState(products[0].name);
+  const [formWarehouse, setFormWarehouse] = useState("");
+  const [formProduct, setFormProduct] = useState("");
   const [formQty, setFormQty] = useState("25");
   const [formParty, setFormParty] = useState("");
 
@@ -49,53 +52,42 @@ export default function OrdersPage() {
   const receivedToday = rows.filter((o) => o.status === "Received").length;
   const drafts = rows.filter((o) => o.status === "Draft").length;
 
-  const createOrder = () => {
+  const createOrder = async () => {
     if (!formParty.trim() && formType !== "Transfer") {
       toast.error("Please enter a party name");
       return;
     }
-    const prefix = formType === "Purchase" ? "PO" : formType === "Sales" ? "SO" : "TO";
-    const newOrder: Order = {
-      id: crypto.randomUUID(),
-      number: `${prefix}-2026-${String(1000 + orderCounter++).slice(0)}`,
+    await apiClient.post("/api/orders", {
       type: formType,
-      status: "Draft",
       party: formType === "Transfer" ? "Internal transfer" : formParty,
-      warehouse: formWarehouse,
-      amount: Number(formQty) * (products.find((p) => p.name === formProduct)?.price ?? 0),
-      date: new Date().toISOString().split("T")[0]
-    };
-    setRows((cur) => [newOrder, ...cur]);
+      warehouse: formWarehouse || warehouses[0]?.name,
+      product: formProduct || products[0]?.name,
+      quantity: Number(formQty) || 1
+    });
+    await refetch();
     setFormParty("");
     setFormQty("25");
-    toast.success(`${newOrder.number} created as Draft`);
+    toast.success("Order created as draft");
   };
 
-  const advanceStatus = (id: string) => {
-    setRows((cur) =>
-      cur.map((o) => {
-        if (o.id !== id) return o;
-        const next = nextStatus[o.status] ?? o.status;
-        if (next === o.status) return o;
-        toast.success(`${o.number} → ${next}`);
-        return { ...o, status: next as Order["status"] };
-      })
-    );
+  const advanceStatus = async (order: Order) => {
+    const statusLabel = String(order.status).slice(0, 1).toUpperCase() + String(order.status).slice(1);
+    const next = nextStatus[statusLabel] ?? statusLabel;
+    if (next === statusLabel) return;
+    await apiClient.patch(`/api/orders/${order.number}/status`, { status: next, type: order.type });
+    await refetch();
+    toast.success(`${order.number} -> ${next}`);
   };
 
-  const cancelOrder = (id: string) => {
-    setRows((cur) =>
-      cur.map((o) => {
-        if (o.id !== id || o.status === "Cancelled") return o;
-        toast.success(`${o.number} cancelled`);
-        return { ...o, status: "Cancelled" as Order["status"] };
-      })
-    );
+  const cancelOrder = async (order: Order) => {
+    await apiClient.patch(`/api/orders/${order.number}/status`, { status: "Cancelled", type: order.type });
+    await refetch();
+    toast.success(`${order.number} cancelled`);
   };
 
-  const deleteOrder = (id: string) => {
-    const order = rows.find((o) => o.id === id);
-    setRows((cur) => cur.filter((o) => o.id !== id));
+  const deleteOrder = async (order: Order) => {
+    await apiClient.delete(`/api/orders/${order.number}`);
+    await refetch();
     toast.success(`${order?.number ?? "Order"} deleted`);
   };
 
@@ -119,7 +111,7 @@ export default function OrdersPage() {
               </div>
               <div className="space-y-2">
                 <Label>Warehouse</Label>
-                <Select className="w-full" value={formWarehouse} onChange={(e) => setFormWarehouse(e.target.value)}>
+                <Select className="w-full" value={formWarehouse || warehouses[0]?.name || ""} onChange={(e) => setFormWarehouse(e.target.value)}>
                   {warehouses.map((warehouse) => (
                     <option key={warehouse.id}>{warehouse.name}</option>
                   ))}
@@ -129,7 +121,7 @@ export default function OrdersPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Product</Label>
-                <Select className="w-full" value={formProduct} onChange={(e) => setFormProduct(e.target.value)}>
+                <Select className="w-full" value={formProduct || products[0]?.name || ""} onChange={(e) => setFormProduct(e.target.value)}>
                   {products.map((product) => (
                     <option key={product.id}>{product.name}</option>
                   ))}
@@ -146,7 +138,7 @@ export default function OrdersPage() {
                 <Input placeholder={formType === "Purchase" ? "Northstar Components" : "BrightMart Retail"} value={formParty} onChange={(e) => setFormParty(e.target.value)} />
               </div>
             )}
-            <Button onClick={createOrder}>
+            <Button onClick={() => void createOrder()} disabled={!warehouses.length || !products.length}>
               <ClipboardPlus />
               Create Draft
             </Button>
@@ -208,12 +200,15 @@ export default function OrdersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {isLoading ? (
+                <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading orders...</TableCell></TableRow>
+              ) : null}
               {filtered.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell className="font-mono text-xs">{order.number}</TableCell>
                   <TableCell>{order.type}</TableCell>
                   <TableCell>
-                    <Badge variant={order.status === "Draft" ? "warning" : order.status === "Cancelled" ? "danger" : "success"}>
+                    <Badge variant={String(order.status).toLowerCase() === "draft" ? "warning" : String(order.status).toLowerCase() === "cancelled" ? "danger" : "success"}>
                       {order.status}
                     </Badge>
                   </TableCell>
@@ -223,20 +218,20 @@ export default function OrdersPage() {
                   <TableCell>{order.date}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
-                      {order.status !== "Received" && order.status !== "Cancelled" && (
-                        <Button variant="outline" size="sm" onClick={() => advanceStatus(order.id)}>
-                          → {nextStatus[order.status]}
+                      {String(order.status).toLowerCase() !== "received" && String(order.status).toLowerCase() !== "delivered" && String(order.status).toLowerCase() !== "cancelled" && (
+                        <Button variant="outline" size="sm" onClick={() => void advanceStatus(order)}>
+                          Advance
                         </Button>
                       )}
-                      {order.status === "Draft" && (
-                        <Button variant="outline" size="sm" onClick={() => cancelOrder(order.id)}>Cancel</Button>
+                      {String(order.status).toLowerCase() === "draft" && (
+                        <Button variant="outline" size="sm" onClick={() => void cancelOrder(order)}>Cancel</Button>
                       )}
-                      <Button variant="outline" size="icon" onClick={() => deleteOrder(order.id)}><Trash2 className="size-4" /></Button>
+                      <Button variant="outline" size="icon" onClick={() => void deleteOrder(order)}><Trash2 className="size-4" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {!isLoading && filtered.length === 0 && (
                 <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No orders match your search</TableCell></TableRow>
               )}
             </TableBody>

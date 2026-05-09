@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
 
 import { PwaRegister } from "@/components/pwa-register";
+import { QueryProvider } from "@/components/query-provider";
+import { RealtimeListener } from "@/components/realtime-listener";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
 import "./globals.css";
@@ -24,9 +26,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
+          <QueryProvider>
+            <AuthProvider>
+              <RealtimeListener />
+              {children}
+            </AuthProvider>
+          </QueryProvider>
           <Toaster richColors position="top-right" />
           <PwaRegister />
         </ThemeProvider>

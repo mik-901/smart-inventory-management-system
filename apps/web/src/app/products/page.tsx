@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { products as initialProducts } from "@/lib/demo-data";
+import { useCreateProduct, useDeleteProduct, useProducts, useUpdateProduct } from "@/hooks/useProducts";
 import { formatCurrency } from "@/lib/utils";
 import type { Product } from "@/types";
 
@@ -26,12 +26,26 @@ const statusVariant = {
   Expiring: "danger"
 } as const;
 
+function variantLabel(variants: any[]) {
+  return variants
+    .map((variant) => (typeof variant === "string" ? variant : variant.variantName ?? variant.variant_name ?? variant.skuSuffix ?? variant.sku_suffix))
+    .filter(Boolean)
+    .join(", ");
+}
+
 export default function ProductsPage() {
-  const [rows, setRows] = useState<Product[]>(initialProducts);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [editId, setEditId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<Product>>({});
+  const queryParams = useMemo(
+    () => ({ search: query, ...(category !== "All" ? { category } : {}) }),
+    [category, query]
+  );
+  const { data: rows, refetch, isLoading } = useProducts(queryParams);
+  const createProduct = useCreateProduct(refetch);
+  const updateProduct = useUpdateProduct(refetch);
+  const removeProduct = useDeleteProduct(refetch);
 
   const filtered = useMemo(() => {
     return rows.filter((product) => {
@@ -49,18 +63,17 @@ export default function ProductsPage() {
     setEditDraft({ name: product.name, price: product.price, costPrice: product.costPrice, reorderLevel: product.reorderLevel, supplier: product.supplier, brand: product.brand, category: product.category });
   };
 
-  const saveEdit = (id: string) => {
-    setRows((current) => current.map((p) => (p.id === id ? { ...p, ...editDraft } : p)));
+  const saveEdit = async (id: string) => {
+    await updateProduct.mutate(id, editDraft);
     setEditId(null);
     setEditDraft({});
-    toast.success("Product updated");
   };
 
   const cancelEdit = () => { setEditId(null); setEditDraft({}); };
 
-  const deleteProduct = (id: string, sku: string) => {
-    setRows((current) => current.filter((item) => item.id !== id));
-    toast.success(`${sku} deleted`);
+  const deleteProduct = async (id: string, sku: string) => {
+    await removeProduct.mutate(id);
+    toast.success(`${sku} disabled`);
   };
 
 
@@ -69,9 +82,8 @@ export default function ProductsPage() {
     <AppShell title="Products" subtitle="Create, edit, scan, and govern SKUs with supplier, batch, and variant metadata.">
       <div className="grid gap-6">
         <ProductForm
-          onCreate={(draft) => {
-            const product: Product = {
-              id: crypto.randomUUID(),
+          onCreate={async (draft) => {
+            await createProduct.mutate({
               name: draft.name,
               sku: draft.sku,
               category: draft.category,
@@ -79,17 +91,17 @@ export default function ProductsPage() {
               price: Number(draft.price || 0),
               costPrice: Number(draft.costPrice || 0),
               barcode: draft.barcode,
-              variants: draft.variants.split(",").map((item) => item.trim()).filter(Boolean),
               batchNumber: draft.batchNumber,
               expiryDate: draft.expiryDate,
               reorderLevel: Number(draft.reorderLevel || 0),
               supplier: draft.supplier,
               imageUrl: draft.imageUrl || "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800",
-              stock: 0,
-              status: "Low Stock"
-            };
-            setRows((current) => [product, ...current]);
-            toast.success(`${product.sku} created`);
+              variants: draft.variants.split(",").map((item) => ({
+                variantName: item.trim(),
+                skuSuffix: item.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-") || "DEFAULT",
+                attributes: {}
+              })).filter((item) => item.variantName)
+            });
           }}
         />
 
@@ -132,6 +144,9 @@ export default function ProductsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {isLoading ? (
+                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Loading products...</TableCell></TableRow>
+                ) : null}
                 {filtered.map((product) => (
                   <TableRow key={product.id}>
                     <TableCell>
@@ -149,7 +164,7 @@ export default function ProductsPage() {
                           ) : (
                             <p className="font-medium">{product.name}</p>
                           )}
-                          <p className="text-xs text-muted-foreground">{product.brand} · {product.variants.join(", ")}</p>
+                          <p className="text-xs text-muted-foreground">{product.brand} · {variantLabel(product.variants ?? [])}</p>
                         </div>
                       </div>
                     </TableCell>
@@ -200,19 +215,22 @@ export default function ProductsPage() {
                       <div className="flex justify-end gap-2">
                         {editId === product.id ? (
                           <>
-                            <Button variant="default" size="icon" onClick={() => saveEdit(product.id)}><Check className="size-4" /></Button>
+                            <Button variant="default" size="icon" onClick={() => void saveEdit(product.id)}><Check className="size-4" /></Button>
                             <Button variant="outline" size="icon" onClick={cancelEdit}><X className="size-4" /></Button>
                           </>
                         ) : (
                           <>
                             <Button variant="outline" size="icon" onClick={() => startEdit(product)}><Edit className="size-4" /></Button>
-                            <Button variant="outline" size="icon" onClick={() => deleteProduct(product.id, product.sku)}><Trash2 className="size-4" /></Button>
+                            <Button variant="outline" size="icon" onClick={() => void deleteProduct(product.id, product.sku)}><Trash2 className="size-4" /></Button>
                           </>
                         )}
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
+                {!isLoading && filtered.length === 0 ? (
+                  <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">No products found</TableCell></TableRow>
+                ) : null}
               </TableBody>
             </Table>
           </CardContent>

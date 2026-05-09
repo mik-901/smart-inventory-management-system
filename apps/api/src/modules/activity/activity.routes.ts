@@ -1,31 +1,32 @@
 import { Router } from "express";
 
-import { demoStore } from "../../data/demo-store.js";
+import { query } from "../../db/pool.js";
 import { requirePermission } from "../../middleware/rbac.js";
-import { pool, query } from "../../db/pool.js";
+import { asyncHandler, ok } from "../../utils/http.js";
 
 export const activityRouter = Router();
 
-activityRouter.get("/", requirePermission("dashboard:read"), async (_req, res) => {
-  if (pool) {
-    try {
-      const rows = await query(`
-        SELECT a.id, u.email as actor, a.action, a.entity_id as entity, a.created_at as time
-        FROM audit_logs a
-        LEFT JOIN users u ON a.actor_id = u.id
-        ORDER BY a.created_at DESC
-        LIMIT 50
-      `);
-      return res.json({ 
-        data: rows.map(r => ({
-          ...r,
-          tone: r.action.includes("deleted") ? "danger" : r.action.includes("updated") ? "warning" : "success"
-        }))
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to fetch activities" });
-    }
-  }
-  res.json({ data: demoStore.activities });
-});
+activityRouter.get(
+  "/",
+  requirePermission("dashboard:read"),
+  asyncHandler(async (_req, res) => {
+    const rows = await query(
+      `select a.id, coalesce(u.name, 'System') as actor, a.action, a.entity_type, a.entity_id, a.created_at
+         from audit_logs a
+         left join users u on u.id = a.user_id
+        order by a.created_at desc
+        limit 50`
+    );
+    return ok(
+      res,
+      rows.map((row) => ({
+        id: row.id,
+        actor: row.actor,
+        action: row.action,
+        entity: row.entity_id ?? row.entity_type,
+        time: row.created_at,
+        tone: String(row.action).includes("delete") ? "danger" : String(row.action).includes("update") ? "warning" : "success"
+      }))
+    );
+  })
+);

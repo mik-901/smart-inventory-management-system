@@ -1,4 +1,4 @@
-export type UserRole = "SUPER_ADMIN" | "MANAGER" | "WAREHOUSE_STAFF" | "VIEWER";
+export type UserRole = "admin" | "manager" | "staff" | "viewer";
 
 export type Product = {
   id: string;
@@ -9,7 +9,7 @@ export type Product = {
   price: number;
   costPrice: number;
   barcode: string;
-  variants: string[];
+  variants: any[];
   batchNumber: string;
   expiryDate: string;
   reorderLevel: number;
@@ -23,6 +23,7 @@ export type Warehouse = {
   id: string;
   name: string;
   code: string;
+  location?: string;
   city: string;
   manager: string;
   capacity: number;
@@ -38,7 +39,7 @@ export type InventoryItem = {
   warehouse: string;
   available: number;
   reserved: number;
-  damaged: number;
+  damaged?: number;
   reorderLevel: number;
   lastSync: string;
 };
@@ -47,7 +48,7 @@ export type Order = {
   id: string;
   number: string;
   type: "Purchase" | "Sales" | "Transfer";
-  status: "Draft" | "Approved" | "Dispatched" | "Received" | "Returned" | "Cancelled";
+  status: string;
   party: string;
   warehouse: string;
   amount: number;
@@ -58,6 +59,7 @@ export type ReturnRecord = {
   id: string;
   number: string;
   orderNumber: string;
+  referenceId?: string;
   reason: string;
   status: string;
   items: number;
@@ -79,6 +81,7 @@ export type AppUser = {
   name: string;
   email: string;
   role: UserRole;
+  isActive?: boolean;
   lastLogin: string;
   status: "Active" | "Invited" | "Suspended";
 };
@@ -87,7 +90,8 @@ export type NotificationItem = {
   id: string;
   title: string;
   message: string;
-  type: "LOW_STOCK" | "REORDER" | "SYSTEM" | "ORDER";
+  type: string;
   read: boolean;
+  isRead?: boolean;
   time: string;
 };

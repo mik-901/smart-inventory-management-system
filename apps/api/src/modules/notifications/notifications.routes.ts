@@ -1,47 +1,51 @@
 import { Router } from "express";
 
-import { demoStore } from "../../data/demo-store.js";
+import { query } from "../../db/pool.js";
 import { requirePermission } from "../../middleware/rbac.js";
-import type { AuthRequest } from "../../middleware/auth.js";
-import { pool, query } from "../../db/pool.js";
+import type { AuthRequest } from "../../types/index.js";
+import { asyncHandler, ok } from "../../utils/http.js";
 
 export const notificationsRouter = Router();
 
-notificationsRouter.get("/", requirePermission("dashboard:read"), async (req: AuthRequest, res) => {
-  if (pool) {
-    try {
-      const rows = await query("SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50", [req.user?.id]);
-      return res.json({ 
-        data: rows.map(r => ({
-          ...r,
-          read: r.is_read,
-          time: new Date(r.created_at).toISOString()
-        }))
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to fetch notifications" });
-    }
-  }
-  res.json({ data: demoStore.notifications });
-});
+function mapNotification(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    message: row.message,
+    isRead: row.is_read,
+    read: row.is_read,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    createdAt: row.created_at,
+    time: row.created_at
+  };
+}
 
-notificationsRouter.patch("/:id/read", requirePermission("dashboard:read"), async (req: AuthRequest, res) => {
-  if (pool) {
-    try {
-      const rows = await query("UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2 RETURNING *", [req.params.id, req.user?.id]);
-      if (rows.length === 0) return res.status(404).json({ error: "Notification not found" });
-      
-      const r = rows[0];
-      return res.json({ data: { ...r, read: true, time: new Date(r.created_at).toISOString() } });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to mark notification as read" });
-    }
-  }
+notificationsRouter.get(
+  "/",
+  requirePermission("dashboard:read"),
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const rows = await query("select * from notifications where user_id = $1 order by created_at desc limit 100", [req.user?.id]);
+    return ok(res, rows.map(mapNotification));
+  })
+);
 
-  const notification = demoStore.notifications.find((item) => item.id === req.params.id);
-  if (!notification) return res.status(404).json({ error: "Notification not found" });
-  notification.read = true;
-  res.json({ data: notification });
-});
+notificationsRouter.patch(
+  "/:id/read",
+  requirePermission("dashboard:read"),
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const rows = await query("update notifications set is_read = true where id = $1 and user_id = $2 returning *", [req.params.id, req.user?.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: "Notification not found" });
+    return ok(res, mapNotification(rows[0]), "Notification marked read");
+  })
+);
+
+notificationsRouter.patch(
+  "/read-all",
+  requirePermission("dashboard:read"),
+  asyncHandler<AuthRequest>(async (req, res) => {
+    await query("update notifications set is_read = true where user_id = $1", [req.user?.id]);
+    return ok(res, { readAll: true }, "Notifications marked read");
+  })
+);

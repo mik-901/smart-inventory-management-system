@@ -20,6 +20,8 @@
     "@radix-ui/react-slot": "latest",
     "@radix-ui/react-switch": "latest",
     "@radix-ui/react-tabs": "latest",
+    "@tanstack/react-query": "^5.100.9",
+    "axios": "^1.16.0",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "framer-motion": "latest",
@@ -30,6 +32,7 @@
     "react": "latest",
     "react-dom": "latest",
     "recharts": "latest",
+    "socket.io-client": "^4.8.3",
     "sonner": "latest",
     "tailwind-merge": "latest",
     "zod": "latest"

@@ -66,10 +66,10 @@ function clearAuth() {
 // ── permissions ──────────────────────────────────────────────────────────────
 
 const permissions: Record<UserRole, string[]> = {
-  SUPER_ADMIN: ["*"],
-  MANAGER: ["dashboard", "products", "inventory", "warehouses", "orders", "returns", "reports", "activity"],
-  WAREHOUSE_STAFF: ["dashboard", "products", "inventory", "orders", "returns"],
-  VIEWER: ["dashboard", "products", "inventory", "warehouses", "reports", "activity"]
+  admin: ["*"],
+  manager: ["dashboard", "products", "inventory", "warehouses", "orders", "purchase-orders", "sales-orders", "transfers", "returns", "reports", "activity", "notifications", "settings"],
+  staff: ["dashboard", "products", "inventory", "orders", "purchase-orders", "sales-orders", "transfers", "returns", "warehouses", "notifications"],
+  viewer: ["dashboard", "products", "inventory", "warehouses", "reports", "activity", "notifications"]
 };
 
 export function canAccess(role: UserRole, area: string) {
@@ -142,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const body = await res.json();
 
       if (!res.ok) {
-        throw new Error(body.error ?? "Login failed");
+        throw new Error(body.message ?? body.error ?? "Login failed");
       }
 
       saveSession({
@@ -167,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const body = await res.json();
 
       if (!res.ok) {
-        throw new Error(body.error ?? "Registration failed");
+        throw new Error(body.message ?? body.error ?? "Registration failed");
       }
 
       saveSession({

@@ -3,9 +3,24 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { stockTrend } from "@/lib/demo-data";
+import { inventoryApi } from "@/lib/api/inventory";
+import { useApiQuery } from "@/hooks/useApiResource";
 
 export function StockTrendChart() {
+  const { data: movements } = useApiQuery<any[]>(() => inventoryApi.movements({ limit: 200 }) as Promise<any[]>, [], { initialData: [] });
+  const stockTrend = Object.values(
+    movements.reduce<Record<string, { date: string; inward: number; outward: number }>>((acc, movement: any) => {
+      const date = String(movement.created_at ?? movement.createdAt ?? "").slice(0, 10);
+      if (!date) return acc;
+      acc[date] ??= { date, inward: 0, outward: 0 };
+      const quantity = Number(movement.quantity ?? 0);
+      const type = String(movement.movement_type ?? movement.movementType);
+      if (["purchase", "transfer_in", "return", "adjustment"].includes(type)) acc[date].inward += quantity;
+      if (["sale", "transfer_out", "damage"].includes(type)) acc[date].outward += quantity;
+      return acc;
+    }, {})
+  ).slice(-7);
+
   return (
     <Card className="min-h-[380px]">
       <CardHeader>

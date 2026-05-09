@@ -12,12 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { warehouses as initialWarehouses } from "@/lib/demo-data";
+import { useCreateWarehouse, useDeleteWarehouse, useWarehouses } from "@/hooks/useWarehouses";
 import { formatCurrency, formatNumber } from "@/lib/utils";
-import type { Warehouse } from "@/types";
 
 export default function WarehousesPage() {
-  const [rows, setRows] = useState<Warehouse[]>(initialWarehouses);
   const [searchQuery, setSearchQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formName, setFormName] = useState("");
@@ -25,6 +23,9 @@ export default function WarehousesPage() {
   const [formCity, setFormCity] = useState("");
   const [formManager, setFormManager] = useState("");
   const [formCapacity, setFormCapacity] = useState("5000");
+  const { data: rows, refetch, isLoading } = useWarehouses({ search: searchQuery });
+  const createWarehouse = useCreateWarehouse(refetch);
+  const removeWarehouse = useDeleteWarehouse(refetch);
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return rows;
@@ -32,31 +33,24 @@ export default function WarehousesPage() {
     return rows.filter((w) => [w.name, w.code, w.city, w.manager].join(" ").toLowerCase().includes(q));
   }, [searchQuery, rows]);
 
-  const addWarehouse = () => {
-    if (!formName.trim() || !formCode.trim() || !formCity.trim()) {
-      toast.error("Please fill in name, code, and city");
+  const addWarehouse = async () => {
+    if (!formName.trim() || !formCity.trim()) {
+      toast.error("Please fill in name and city");
       return;
     }
-    const newWarehouse: Warehouse = {
-      id: crypto.randomUUID(),
+    await createWarehouse.mutate({
       name: formName,
-      code: formCode.toUpperCase(),
+      location: formCode.toUpperCase(),
       city: formCity,
-      manager: formManager || "Unassigned",
-      capacity: Number(formCapacity) || 5000,
-      utilization: 0,
-      stockValue: 0,
-      ordersToday: 0
-    };
-    setRows((cur) => [...cur, newWarehouse]);
+      capacity: Number(formCapacity) || 5000
+    });
     setFormName(""); setFormCode(""); setFormCity(""); setFormManager(""); setFormCapacity("5000");
     setShowForm(false);
-    toast.success(`${newWarehouse.name} added`);
   };
 
-  const deleteWarehouse = (id: string) => {
+  const deleteWarehouse = async (id: string) => {
     const w = rows.find((r) => r.id === id);
-    setRows((cur) => cur.filter((r) => r.id !== id));
+    await removeWarehouse.mutate(id);
     toast.success(`${w?.name ?? "Warehouse"} removed`);
   };
 
@@ -142,7 +136,7 @@ export default function WarehousesPage() {
                 <Input type="number" value={formCapacity} onChange={(e) => setFormCapacity(e.target.value)} />
               </div>
             </div>
-            <Button className="mt-4" onClick={addWarehouse}><Plus className="size-4" /> Add</Button>
+            <Button className="mt-4" onClick={() => void addWarehouse()}><Plus className="size-4" /> Add</Button>
           </CardContent>
         )}
         <CardContent className="overflow-x-auto">
@@ -182,12 +176,15 @@ export default function WarehousesPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end">
-                      <Button variant="outline" size="icon" onClick={() => deleteWarehouse(warehouse.id)}><Trash2 className="size-4" /></Button>
+                      <Button variant="outline" size="icon" onClick={() => void deleteWarehouse(warehouse.id)}><Trash2 className="size-4" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {isLoading && (
+                <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Loading warehouses...</TableCell></TableRow>
+              )}
+              {!isLoading && filtered.length === 0 && (
                 <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No warehouses found</TableCell></TableRow>
               )}
             </TableBody>

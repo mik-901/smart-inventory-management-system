@@ -1,7 +1,6 @@
 import type { NextFunction, Response } from "express";
 
-import type { AuthRequest } from "./auth.js";
-import type { Role } from "../data/demo-store.js";
+import type { AuthRequest, Role } from "../types/index.js";
 
 type Permission =
   | "dashboard:read"
@@ -15,8 +14,15 @@ type Permission =
   | "users:manage"
   | "settings:manage";
 
+const rank: Record<Role, number> = {
+  viewer: 1,
+  staff: 2,
+  manager: 3,
+  admin: 4
+};
+
 const rolePermissions: Record<Role, Permission[]> = {
-  SUPER_ADMIN: [
+  admin: [
     "dashboard:read",
     "products:read",
     "products:write",
@@ -28,7 +34,7 @@ const rolePermissions: Record<Role, Permission[]> = {
     "users:manage",
     "settings:manage"
   ],
-  MANAGER: [
+  manager: [
     "dashboard:read",
     "products:read",
     "products:write",
@@ -36,17 +42,35 @@ const rolePermissions: Record<Role, Permission[]> = {
     "inventory:write",
     "orders:read",
     "orders:write",
-    "reports:read"
+    "reports:read",
+    "settings:manage"
   ],
-  WAREHOUSE_STAFF: ["dashboard:read", "products:read", "inventory:read", "inventory:write", "orders:read", "orders:write"],
-  VIEWER: ["dashboard:read", "products:read", "inventory:read", "orders:read", "reports:read"]
+  staff: ["dashboard:read", "products:read", "inventory:read", "inventory:write", "orders:read", "orders:write"],
+  viewer: ["dashboard:read", "products:read", "inventory:read", "orders:read", "reports:read"]
 };
+
+export function requireMinimumRole(minimum: Role) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    const role = req.user?.role;
+    if (!role || rank[role] < rank[minimum]) {
+      return res.status(403).json({ success: false, message: "Insufficient permissions" });
+    }
+    return next();
+  };
+}
+
+export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ success: false, message: "Admin role required" });
+  }
+  return next();
+}
 
 export function requirePermission(permission: Permission) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     const role = req.user?.role;
     if (!role || !rolePermissions[role].includes(permission)) {
-      return res.status(403).json({ error: "Insufficient permissions" });
+      return res.status(403).json({ success: false, message: "Insufficient permissions" });
     }
     return next();
   };

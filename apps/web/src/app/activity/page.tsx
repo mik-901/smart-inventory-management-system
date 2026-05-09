@@ -9,9 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { activities, users } from "@/lib/demo-data";
+import { useActivity } from "@/hooks/useDashboard";
 
 export default function ActivityPage() {
+  const { data: activities, isLoading } = useActivity();
   const [searchQuery, setSearchQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
 
@@ -38,7 +39,7 @@ export default function ActivityPage() {
         <Card className="p-5">
           <LockKeyhole className="size-5 text-primary" />
           <p className="mt-4 text-sm text-muted-foreground">Login Records</p>
-          <p className="mt-2 text-2xl font-semibold">{users.length}</p>
+          <p className="mt-2 text-2xl font-semibold">Live</p>
         </Card>
         <Card className="p-5">
           <Clock className="size-5 text-primary" />
@@ -80,6 +81,9 @@ export default function ActivityPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {isLoading ? (
+                <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading activity...</TableCell></TableRow>
+              ) : null}
               {filtered.map((activity) => (
                 <TableRow key={activity.id}>
                   <TableCell className="font-medium">{activity.actor}</TableCell>
@@ -93,7 +97,7 @@ export default function ActivityPage() {
                   <TableCell>{activity.time}</TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {!isLoading && filtered.length === 0 && (
                 <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No activity matches your search.</TableCell></TableRow>
               )}
             </TableBody>

@@ -1,52 +1,139 @@
 import { Router } from "express";
+import { randomBytes, scrypt } from "node:crypto";
+import { promisify } from "node:util";
+import { z } from "zod";
 
-import { demoStore } from "../../data/demo-store.js";
-import { requirePermission } from "../../middleware/rbac.js";
+import { query, queryOne } from "../../db/pool.js";
+import { requireAdmin } from "../../middleware/rbac.js";
 import { validateBody } from "../../middleware/validate.js";
-import { userRoleSchema } from "../../validators/schemas.js";
-import { writeAudit } from "../../utils/audit.js";
-import type { AuthRequest } from "../../middleware/auth.js";
-import { pool, query } from "../../db/pool.js";
+import { asyncHandler, created, noContent, ok, paginated } from "../../utils/http.js";
+import { parseListQuery } from "../../utils/pagination.js";
+import { toInteger } from "../../utils/serializers.js";
 
 export const usersRouter = Router();
 
-usersRouter.get("/", requirePermission("users:manage"), async (_req, res) => {
-  if (pool) {
-    try {
-      const rows = await query("SELECT id, name, email, role, last_login_at FROM users ORDER BY created_at DESC");
-      return res.json({ 
-        data: rows.map(r => ({
-          ...r,
-          lastLogin: r.last_login_at,
-          status: "Active"
-        }))
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to fetch users" });
-    }
-  }
-  res.json({ data: demoStore.users });
+const scryptAsync = promisify(scrypt);
+
+const userSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(8).optional(),
+  role: z.enum(["admin", "manager", "staff", "viewer"]).default("viewer"),
+  isActive: z.boolean().optional(),
+  is_active: z.boolean().optional()
 });
 
-usersRouter.patch("/:id/role", requirePermission("users:manage"), validateBody(userRoleSchema), async (req: AuthRequest, res) => {
-  if (pool) {
-    try {
-      const rows = await query("UPDATE users SET role = $1, updated_at = now() WHERE id = $2 RETURNING *", [req.body.role, req.params.id]);
-      if (rows.length === 0) return res.status(404).json({ error: "User not found" });
-      
-      const user = rows[0];
-      writeAudit(req, "updated user role", user.email);
-      return res.json({ data: { ...user, lastLogin: user.last_login_at, status: "Active" } });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ error: "Failed to update user role" });
-    }
-  }
-
-  const user = demoStore.users.find((item) => item.id === req.params.id);
-  if (!user) return res.status(404).json({ error: "User not found" });
-  user.role = req.body.role;
-  writeAudit(req, "updated user role", user.email);
-  res.json({ data: user });
+const passwordSchema = z.object({
+  password: z.string().min(8)
 });
+
+async function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${derived.toString("hex")}`;
+}
+
+function mapUser(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    isActive: row.is_active,
+    status: row.is_active ? "Active" : "Suspended",
+    lastLogin: row.last_login_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+usersRouter.get(
+  "/",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const list = parseListQuery(req, "created_at");
+    const filters: string[] = [];
+    const params: unknown[] = [];
+    if (list.search) {
+      params.push(`%${list.search}%`);
+      filters.push(`(name ilike $${params.length} or email ilike $${params.length})`);
+    }
+    const where = filters.length ? `where ${filters.join(" and ")}` : "";
+    const count = await queryOne<{ count: string }>(`select count(*) from users ${where}`, params);
+    const rows = await query(
+      `select id, name, email, role, is_active, last_login_at, created_at, updated_at
+         from users
+         ${where}
+        order by created_at desc
+        limit $${params.length + 1} offset $${params.length + 2}`,
+      [...params, list.limit, list.offset]
+    );
+    return paginated(res, rows.map(mapUser), { page: list.page, limit: list.limit, total: toInteger(count?.count) });
+  })
+);
+
+usersRouter.post(
+  "/",
+  requireAdmin,
+  validateBody(userSchema.required({ password: true })),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof userSchema> & { password: string };
+    const row = await queryOne(
+      `insert into users (name, email, password_hash, role, is_active)
+       values ($1, lower($2), $3, $4, $5)
+       returning id, name, email, role, is_active, last_login_at, created_at, updated_at`,
+      [body.name, body.email, await hashPassword(body.password), body.role, body.isActive ?? body.is_active ?? true]
+    );
+    return created(res, mapUser(row ?? {}), "User created");
+  })
+);
+
+usersRouter.get(
+  "/:id",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const row = await queryOne("select id, name, email, role, is_active, last_login_at, created_at, updated_at from users where id = $1", [req.params.id]);
+    if (!row) return res.status(404).json({ success: false, message: "User not found" });
+    return ok(res, mapUser(row));
+  })
+);
+
+usersRouter.put(
+  "/:id",
+  requireAdmin,
+  validateBody(userSchema.partial()),
+  asyncHandler(async (req, res) => {
+    const body = req.body as Partial<z.infer<typeof userSchema>>;
+    const row = await queryOne(
+      `update users
+          set name = coalesce($2, name),
+              email = coalesce(lower($3), email),
+              role = coalesce($4, role),
+              is_active = coalesce($5, is_active)
+        where id = $1
+        returning id, name, email, role, is_active, last_login_at, created_at, updated_at`,
+      [req.params.id, body.name ?? null, body.email ?? null, body.role ?? null, body.isActive ?? body.is_active ?? null]
+    );
+    if (!row) return res.status(404).json({ success: false, message: "User not found" });
+    return ok(res, mapUser(row), "User updated");
+  })
+);
+
+usersRouter.patch(
+  "/:id/password",
+  requireAdmin,
+  validateBody(passwordSchema),
+  asyncHandler(async (req, res) => {
+    await query("update users set password_hash = $2 where id = $1", [req.params.id, await hashPassword(req.body.password)]);
+    return ok(res, { id: req.params.id }, "Password updated");
+  })
+);
+
+usersRouter.delete(
+  "/:id",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await query("update users set is_active = false where id = $1", [req.params.id]);
+    return noContent(res);
+  })
+);

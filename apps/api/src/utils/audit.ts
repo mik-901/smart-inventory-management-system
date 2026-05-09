@@ -1,28 +1,18 @@
 import type { AuthRequest } from "../middleware/auth.js";
-import { demoStore } from "../data/demo-store.js";
-import { pool, query } from "../db/pool.js";
-import crypto from "node:crypto";
+import { query } from "../db/pool.js";
 
-export async function writeAudit(req: AuthRequest, action: string, entity: string) {
-  if (!pool) {
-    demoStore.activities.unshift({
-      id: crypto.randomUUID(),
-      actor: req.user?.email ?? "system",
+export async function writeAudit(req: AuthRequest, action: string, entityType: string, entityId?: string | null, newValues?: unknown) {
+  await query(
+    `insert into audit_logs (user_id, action, entity_type, entity_id, new_values, ip_address, user_agent)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      req.user?.id ?? null,
       action,
-      entity,
-      time: "just now",
-      tone: "info"
-    });
-    return;
-  }
-
-  try {
-    await query(
-      `INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [req.user?.id || null, action, "entity", entity, req.ip, req.get("user-agent")]
-    );
-  } catch (error) {
-    console.error("Failed to write audit log:", error);
-  }
+      entityType,
+      entityId ?? null,
+      newValues == null ? null : JSON.stringify(newValues),
+      req.ip,
+      req.get("user-agent") ?? null
+    ]
+  );
 }
