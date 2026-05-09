@@ -5,8 +5,9 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 
   res.status(status).json({
     success: false,
-    message: status === 500 ? "Internal server error" : error.message,
+    message: error.message || "Internal server error",
     errors: error.errors,
+    stack: error.stack,
     requestId: crypto.randomUUID()
   });
 };
