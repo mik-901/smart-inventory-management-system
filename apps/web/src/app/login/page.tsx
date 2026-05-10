@@ -33,9 +33,18 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await login(email, password);
+      const user = await login(email, password);
       toast.success("Welcome back!");
-      router.push("/dashboard");
+      
+      if (user.role === "admin") {
+        router.push("/dashboard");
+      } else if (user.role === "manager") {
+        router.push("/warehouses");
+      } else if (user.role === "staff") {
+        router.push("/inventory");
+      } else {
+        router.push("/reports");
+      }
     } catch (err: any) {
       toast.error(err.message ?? "Invalid credentials");
     } finally {

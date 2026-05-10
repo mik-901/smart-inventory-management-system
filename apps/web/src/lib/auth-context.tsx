@@ -21,8 +21,8 @@ type AuthState = {
 };
 
 type AuthContextValue = AuthState & {
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
+  register: (name: string, email: string, password: string) => Promise<AuthUser>;
   logout: () => void;
   refreshSession: () => Promise<boolean>;
 };
@@ -132,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── login ────────────────────────────────────────────────────────────────
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string): Promise<AuthUser> => {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,6 +150,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessToken: body.data.accessToken,
         refreshToken: body.data.refreshToken
       });
+      
+      return body.data.user;
     },
     [saveSession]
   );
@@ -157,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── register ─────────────────────────────────────────────────────────────
 
   const register = useCallback(
-    async (name: string, email: string, password: string) => {
+    async (name: string, email: string, password: string): Promise<AuthUser> => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -175,6 +177,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessToken: body.data.accessToken,
         refreshToken: body.data.refreshToken
       });
+      
+      return body.data.user;
     },
     [saveSession]
   );

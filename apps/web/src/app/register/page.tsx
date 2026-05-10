@@ -51,9 +51,17 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await register(name, email, password);
+      const user = await register(name, email, password);
       toast.success("Account created! Welcome aboard.");
-      router.push("/dashboard");
+      if (user.role === "admin") {
+        router.push("/dashboard");
+      } else if (user.role === "manager") {
+        router.push("/warehouses");
+      } else if (user.role === "staff") {
+        router.push("/inventory");
+      } else {
+        router.push("/reports");
+      }
     } catch (err: any) {
       toast.error(err.message ?? "Registration failed");
     } finally {

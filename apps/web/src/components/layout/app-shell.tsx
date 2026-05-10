@@ -71,8 +71,16 @@ export function AppShell({ children, title, subtitle }: { children: React.ReactN
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace("/login");
+    } else if (!isLoading && user) {
+      const area = pathname.split("?")[0].replace("/", "") || "dashboard";
+      if (!canAccess(user.role, area)) {
+        if (user.role === "admin") router.replace("/dashboard");
+        else if (user.role === "manager") router.replace("/warehouses");
+        else if (user.role === "staff") router.replace("/inventory");
+        else router.replace("/reports");
+      }
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, user, pathname, router]);
 
   const visibleItems = useMemo(() => {
     if (!user) return navigationItems;

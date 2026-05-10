@@ -10,13 +10,15 @@ import {
   RotateCcw,
   Settings,
   ShieldCheck,
-  Truck
+  Truck,
+  ScanLine
 } from "lucide-react";
 
 export const navigationItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/products", label: "Products", icon: Package },
   { href: "/inventory", label: "Inventory", icon: Boxes },
+  { href: "/inventory/scan", label: "Scan Barcode", icon: ScanLine },
   { href: "/warehouses", label: "Warehouses", icon: Building2 },
   { href: "/orders", label: "Orders", icon: Truck },
   { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },

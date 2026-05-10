@@ -1,71 +1,81 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Camera, SquareDashedMousePointer } from "lucide-react";
-import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
+import { Html5QrcodeScanner, Html5QrcodeScanType } from "html5-qrcode";
+import { Camera, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 
-export function BarcodeScanner({ onScan }: { onScan: (value: string) => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const scanningRef = useRef(false);
-  const [active, setActive] = useState(false);
+type BarcodeScannerProps = {
+  onScanSuccess: (decodedText: string) => void;
+  onClose: () => void;
+};
 
-  const startScan = async () => {
-    if (!("BarcodeDetector" in window)) {
-      toast.error("Native BarcodeDetector is not available in this browser.");
-      return;
-    }
+export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) {
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-    }
-    scanningRef.current = true;
-    setActive(true);
+  useEffect(() => {
+    const scanner = new Html5QrcodeScanner(
+      "reader",
+      {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+        rememberLastUsedCamera: true,
+      },
+      false
+    );
 
-    const detector = new (window as unknown as { BarcodeDetector: new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue: string }>> } }).BarcodeDetector({
-      formats: ["ean_13", "code_128", "qr_code"]
-    });
+    scannerRef.current = scanner;
 
-    const scanFrame = async () => {
-      if (!videoRef.current || !scanningRef.current) return;
-      const codes = await detector.detect(videoRef.current).catch(() => []);
-      if (codes.length > 0) {
-        onScan(codes[0].rawValue);
-        toast.success(`Scanned ${codes[0].rawValue}`);
-        stopScan();
-        return;
+    scanner.render(
+      (decodedText) => {
+        // Stop scanning after a successful scan to prevent multiple rapid triggers
+        scanner.pause(true);
+        onScanSuccess(decodedText);
+      },
+      (errorMessage) => {
+        // html5-qrcode continuously fires errors if it doesn't see a barcode in the frame
+        // We only want to log real errors, so we ignore standard not-found errors
+        if (!errorMessage.includes("NotFoundException")) {
+          // console.warn(errorMessage);
+        }
       }
-      requestAnimationFrame(scanFrame);
+    );
+
+    return () => {
+      scanner.clear().catch(console.error);
     };
+  }, [onScanSuccess]);
 
-    requestAnimationFrame(scanFrame);
-  };
-
-  const stopScan = () => {
-    const stream = videoRef.current?.srcObject as MediaStream | null;
-    stream?.getTracks().forEach((track) => track.stop());
-    if (videoRef.current) videoRef.current.srcObject = null;
-    scanningRef.current = false;
-    setActive(false);
+  const handleResume = () => {
+    if (scannerRef.current) {
+      scannerRef.current.resume();
+    }
   };
 
   return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between border-b p-4">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <SquareDashedMousePointer className="size-4 text-primary" />
-          Barcode Scanner
-        </div>
-        <Button size="sm" variant={active ? "destructive" : "secondary"} onClick={active ? stopScan : startScan}>
-          <Camera />
-          {active ? "Stop" : "Scan"}
+    <div className="relative flex flex-col items-center justify-center rounded-xl overflow-hidden bg-black/5 dark:bg-white/5 border p-4">
+      <div className="flex w-full items-center justify-between mb-4">
+        <h3 className="font-semibold flex items-center gap-2">
+          <Camera className="w-4 h-4" /> Scanner
+        </h3>
+        <Button variant="ghost" size="icon" onClick={onClose}>
+          <X className="w-4 h-4" />
         </Button>
       </div>
-      <video ref={videoRef} className="aspect-video w-full bg-slate-950 object-cover" muted playsInline />
-    </Card>
+
+      <div id="reader" className="w-full max-w-sm rounded-lg overflow-hidden [&>div]:!border-none" />
+
+      {error && <p className="text-red-500 mt-4 text-sm">{error}</p>}
+      
+      <div className="mt-4 flex gap-2">
+        <Button variant="outline" onClick={handleResume}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Resume Scanning
+        </Button>
+      </div>
+    </div>
   );
 }
