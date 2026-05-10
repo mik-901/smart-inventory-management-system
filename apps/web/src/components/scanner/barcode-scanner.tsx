@@ -7,11 +7,11 @@ import { Camera, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type BarcodeScannerProps = {
-  onScanSuccess: (decodedText: string) => void;
-  onClose: () => void;
+  onScan: (decodedText: string) => void;
+  onClose?: () => void;
 };
 
-export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) {
+export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +33,7 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
       (decodedText) => {
         // Stop scanning after a successful scan to prevent multiple rapid triggers
         scanner.pause(true);
-        onScanSuccess(decodedText);
+        onScan(decodedText);
       },
       (errorMessage) => {
         // html5-qrcode continuously fires errors if it doesn't see a barcode in the frame
@@ -47,7 +47,7 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
     return () => {
       scanner.clear().catch(console.error);
     };
-  }, [onScanSuccess]);
+  }, [onScan]);
 
   const handleResume = () => {
     if (scannerRef.current) {
@@ -61,9 +61,11 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
         <h3 className="font-semibold flex items-center gap-2">
           <Camera className="w-4 h-4" /> Scanner
         </h3>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="w-4 h-4" />
-        </Button>
+        {onClose && (
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </Button>
+        )}
       </div>
 
       <div id="reader" className="w-full max-w-sm rounded-lg overflow-hidden [&>div]:!border-none" />

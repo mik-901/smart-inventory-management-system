@@ -55,7 +55,7 @@ export default function ScanPage() {
           </CardHeader>
           <CardContent className="flex-1 flex flex-col justify-center gap-4">
             {scanning ? (
-              <BarcodeScanner onScanSuccess={handleScanSuccess} onClose={() => setScanning(false)} />
+              <BarcodeScanner onScan={handleScanSuccess} onClose={() => setScanning(false)} />
             ) : (
               <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-xl bg-muted/30">
                 <ScanLine className="w-12 h-12 text-muted-foreground mb-4" />
@@ -111,19 +111,19 @@ export default function ScanPage() {
                 );
               }
               
-              const productStock = inventory?.filter(i => i.product_id === product.id) || [];
+              const productStock = inventory?.filter(i => i.sku === product.sku) || [];
               
               return (
                 <div className="space-y-6">
                   <div className="flex gap-4 items-start">
-                    {product.image_url && (
-                      <img src={product.image_url} alt={product.name} className="w-20 h-20 rounded-md object-cover border bg-muted" />
+                    {product.imageUrl && (
+                      <img src={product.imageUrl} alt={product.name} className="w-20 h-20 rounded-md object-cover border bg-muted" />
                     )}
                     <div>
                       <h3 className="font-medium text-lg">{product.name}</h3>
                       <p className="text-sm font-mono text-muted-foreground">{product.sku}</p>
-                      <Badge variant={product.is_active ? "success" : "secondary"} className="mt-2">
-                        {product.is_active ? "Active" : "Inactive"}
+                      <Badge variant={product.status === "Healthy" ? "success" : "secondary"} className="mt-2">
+                        {product.status}
                       </Badge>
                     </div>
                   </div>
@@ -135,11 +135,11 @@ export default function ScanPage() {
                     {productStock.length > 0 ? (
                       <div className="space-y-2">
                         {productStock.map(stock => {
-                          const wh = warehouses?.find(w => w.id === stock.warehouse_id);
+                          const wh = warehouses?.find(w => w.name === stock.warehouse || w.id === stock.warehouse);
                           return (
                             <div key={stock.id} className="flex justify-between items-center text-sm">
-                              <span>{wh?.name || 'Unknown Location'}</span>
-                              <span className="font-medium">{stock.available_quantity} {product.unit_of_measure}s</span>
+                              <span>{wh?.name || stock.warehouse || 'Unknown Location'}</span>
+                              <span className="font-medium">{stock.available} units</span>
                             </div>
                           );
                         })}
