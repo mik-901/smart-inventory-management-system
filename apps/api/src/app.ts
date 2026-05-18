@@ -52,18 +52,11 @@ const protectedMounts: Mount[] = [
 export function createApp() {
   const app = express();
 
-  // CORS Configuration
-  const corsOrigin = env.CORS_ORIGIN || "http://localhost:3000";
-  const corsOrigins = corsOrigin.split(",").map(origin => origin.trim());
-  
   app.use(helmet());
   app.use(
     cors({
-      origin: corsOrigins.length > 1 ? corsOrigins : corsOrigin,
-      credentials: true,
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-      maxAge: 86400
+      origin: env.CORS_ORIGIN,
+      credentials: true
     })
   );
   app.use(express.json({ limit: "5mb" }));
@@ -75,7 +68,6 @@ export function createApp() {
       status: "ok",
       service: "smart-inventory-api",
       database: pool ? "configured" : "missing DATABASE_URL",
-      environment: env.NODE_ENV,
       timestamp: new Date().toISOString()
     });
   });
@@ -83,6 +75,7 @@ export function createApp() {
   app.use("/auth", authRouter);
 
   for (const [path, router] of protectedMounts) {
+    app.use(path, authenticate, auditMutations, router);
     app.use(`/api${path}`, authenticate, auditMutations, router);
   }
 

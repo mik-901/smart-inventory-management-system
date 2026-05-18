@@ -37,21 +37,10 @@ The app runs in demo mode even before Supabase is connected. To use the real dat
 
 ## Deployment
 
-**Recommended**: Deploy everything to **Railway** for optimal performance.
-
-- Deploy entire monorepo to [Railway.app](https://railway.app)
-- Database (PostgreSQL) is auto-created and configured
-- API and Web services communicate efficiently on the same platform
-- See [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) for step-by-step instructions
-
-**Alternative**: Deploy API and Web separately, but not recommended due to CORS and latency issues.
-
-### Why Railway?
-✅ Single platform for API, Web, and Database  
-✅ Zero CORS configuration needed (internal networking)  
-✅ Better performance (services on same infrastructure)  
-✅ Automatic environment variable management  
-✅ Simple, unified environment setup  
+- Deploy `apps/web` to Vercel.
+- Deploy `apps/api` to Railway.
+- Use Supabase PostgreSQL for the database.
+- Set the same API/auth/database environment variables in each hosting provider.
 
 ## Included Features
 
