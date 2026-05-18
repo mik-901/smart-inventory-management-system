@@ -1,0 +1,78 @@
+$schema: https://railway.app/railway.schema.json
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    variables:
+      POSTGRES_DB: smart_inventory
+      POSTGRES_USER: railway
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthCheck:
+      test: ["CMD-SHELL", "pg_isready -U railway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API Service
+  api:
+    build:
+      builder: NIXPACKS
+      rootDir: apps/api
+    depends_on:
+      - postgres
+    variables:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://railway:${{ secrets.POSTGRES_PASSWORD }}@${{ services.postgres.host }}:${{ services.postgres.port }}/smart_inventory
+      CORS_ORIGIN: https://${{ services.web.domain }}
+      JWT_AUDIENCE: smart-inventory
+      JWT_ISSUER: smart-inventory-api
+      EMAIL_FROM: inventory@${{ services.api.domain }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CLERK_JWKS_URL: ${{ secrets.CLERK_JWKS_URL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+    deploy:
+      startCommand: npm run start
+      restartPolicyType: ON_FAILURE
+      restartPolicyMaxRetries: 3
+    healthCheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      startPeriod: 60s
+
+  # Frontend Web Service
+  web:
+    build:
+      builder: NIXPACKS
+      rootDir: apps/web
+    depends_on:
+      - api
+    variables:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://${{ services.api.domain }}
+      NEXT_PUBLIC_APP_URL: https://${{ services.web.domain }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+    deploy:
+      startCommand: npm run start
+      restartPolicyType: ON_FAILURE
+      restartPolicyMaxRetries: 3
+    healthCheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      startPeriod: 60s
+
+volumes:
+  postgres_data:

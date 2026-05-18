@@ -1,0 +1,74 @@
+# Build files
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dependencies
+yarn.lock
+package-lock.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.test-cache/
+
+# Documentation (Railway will handle from sources)
+README.md
+docs/
+DEPLOYMENT.md
+RENDER_DEPLOYMENT.md
+VERCEL_DEPLOYMENT.md
+
+# Database backups
+*.sql
+database/backups/
+
+# Misc
+.cache/
+cache/
+temp/
+tmp/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep only what's needed for deployment
+!apps/
+!database/schema.sql
+!database/seed.sql
+!packages/
+!package.json
+!tsconfig.json
+!.gitignore
