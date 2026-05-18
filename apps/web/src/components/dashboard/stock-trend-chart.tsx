@@ -22,12 +22,12 @@ export function StockTrendChart() {
   ).slice(-7);
 
   return (
-    <Card className="min-h-[380px]">
+    <Card className="min-h-[380px] flex flex-col">
       <CardHeader>
         <CardTitle>Stock Movement Trend</CardTitle>
         <CardDescription>Inward, outward, and closing stock over the last 7 days</CardDescription>
       </CardHeader>
-      <CardContent className="h-[290px]">
+      <CardContent className="flex-1 min-h-[250px]" style={{ height: '280px' }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={stockTrend}>
             <defs>

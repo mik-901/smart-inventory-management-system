@@ -15,12 +15,12 @@ export function WarehousePerformanceChart() {
   }));
 
   return (
-    <Card className="min-h-[380px]">
+    <Card className="min-h-[380px] flex flex-col">
       <CardHeader>
         <CardTitle>Warehouse Performance</CardTitle>
         <CardDescription>Utilization, picking accuracy, and order load</CardDescription>
       </CardHeader>
-      <CardContent className="h-[290px]">
+      <CardContent className="flex-1 min-h-[250px]" style={{ height: '280px' }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={warehousePerformance}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.18} vertical={false} />

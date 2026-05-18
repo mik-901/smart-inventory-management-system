@@ -17,8 +17,8 @@ type AdjustmentInput = {
 };
 
 export async function adjustInventory(client: PoolClient, input: AdjustmentInput) {
-  const quantityDelta = input.quantityDelta ?? 0;
-  const reservedDelta = input.reservedDelta ?? 0;
+  const quantityDelta = Number(input.quantityDelta ?? 0);
+  const reservedDelta = Number(input.reservedDelta ?? 0);
 
   await client.query(
     `insert into inventory (product_id, warehouse_id, quantity, reserved_quantity, batch_number)
@@ -29,15 +29,15 @@ export async function adjustInventory(client: PoolClient, input: AdjustmentInput
 
   const updated = await client.query(
     `update inventory
-       set quantity = quantity + $3,
-           reserved_quantity = reserved_quantity + $4,
+       set quantity = quantity + $3::int,
+           reserved_quantity = reserved_quantity + $4::int,
            updated_at = now()
      where product_id = $1
        and warehouse_id = $2
        and batch_number = ''
-       and quantity + $3 >= 0
-       and reserved_quantity + $4 >= 0
-       and reserved_quantity + $4 <= quantity + $3
+       and quantity + $3::int >= 0
+       and reserved_quantity + $4::int >= 0
+       and reserved_quantity + $4::int <= quantity + $3::int
      returning id, product_id, warehouse_id, quantity, reserved_quantity, available_quantity`,
     [input.productId, input.warehouseId, quantityDelta, reservedDelta]
   );

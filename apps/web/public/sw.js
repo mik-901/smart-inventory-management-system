@@ -1,8 +1,15 @@
 const CACHE_NAME = "smart-inventory-shell-v1";
-const CORE_ASSETS = ["/", "/login", "/dashboard", "/manifest.webmanifest", "/icon.svg"];
+const CORE_ASSETS = ["/", "/login", "/dashboard", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => 
+      cache.addAll(CORE_ASSETS).catch(() => {
+        // Ignore errors during initial cache, cache assets as they're accessed
+        return cache.addAll(CORE_ASSETS.filter(asset => asset !== "/"));
+      })
+    )
+  );
   self.skipWaiting();
 });
 
