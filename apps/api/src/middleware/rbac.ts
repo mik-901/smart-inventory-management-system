@@ -11,7 +11,10 @@ type Permission =
   | "orders:read"
   | "orders:write"
   | "reports:read"
+  | "audit:read"
+  | "users:read"
   | "users:manage"
+  | "warehouses:read"
   | "settings:manage";
 
 const rank: Record<Role, number> = {
@@ -31,7 +34,10 @@ const rolePermissions: Record<Role, Permission[]> = {
     "orders:read",
     "orders:write",
     "reports:read",
+    "audit:read",
+    "users:read",
     "users:manage",
+    "warehouses:read",
     "settings:manage"
   ],
   manager: [
@@ -43,10 +49,12 @@ const rolePermissions: Record<Role, Permission[]> = {
     "orders:read",
     "orders:write",
     "reports:read",
+    "users:read",
+    "warehouses:read",
     "settings:manage"
   ],
-  staff: ["dashboard:read", "products:read", "inventory:read", "inventory:write", "orders:read", "orders:write"],
-  viewer: ["dashboard:read", "products:read", "inventory:read", "orders:read", "reports:read"]
+  staff: ["dashboard:read", "products:read", "inventory:read", "inventory:write", "orders:read", "orders:write", "users:read", "warehouses:read"],
+  viewer: ["dashboard:read", "products:read", "inventory:read", "orders:read", "reports:read", "users:read", "warehouses:read"]
 };
 
 export function requireMinimumRole(minimum: Role) {

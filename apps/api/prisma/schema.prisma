@@ -1,0 +1,422 @@
+// Smart Inventory Management System — Prisma Schema (SQLite)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ─── USERS ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         String   @default("viewer") // admin | manager | staff | viewer
+  isActive     Boolean  @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  managedWarehouses Warehouse[]       @relation("WarehouseManager")
+  stockMovements    StockMovement[]   @relation("MovementCreator")
+  purchaseOrders    PurchaseOrder[]   @relation("POCreator")
+  salesOrders       SalesOrder[]      @relation("SOCreator")
+  transfers         Transfer[]        @relation("TransferInitiator")
+  processedReturns  Return[]          @relation("ReturnProcessor")
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  updatedSettings   Setting[]
+
+  @@index([role, isActive])
+  @@map("users")
+}
+
+// ─── WAREHOUSES ──────────────────────────────────────────────────────────────
+
+model Warehouse {
+  id        String  @id @default(cuid())
+  name      String
+  location  String?
+  address   String?
+  city      String
+  country   String  @default("India")
+  capacity  Int     @default(0)
+  managerId String? @map("manager_id")
+  isActive  Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  manager             User?             @relation("WarehouseManager", fields: [managerId], references: [id], onDelete: SetNull)
+  inventory           Inventory[]
+  stockMovements      StockMovement[]
+  purchaseOrders      PurchaseOrder[]
+  salesOrders         SalesOrder[]
+  transfersFrom       Transfer[]        @relation("TransferFrom")
+  transfersTo         Transfer[]        @relation("TransferTo")
+  returns             Return[]
+
+  @@index([isActive, city])
+  @@map("warehouses")
+}
+
+// ─── CATEGORIES ──────────────────────────────────────────────────────────────
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  parentId    String?  @map("parent_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+// ─── SUPPLIERS ───────────────────────────────────────────────────────────────
+
+model Supplier {
+  id            String  @id @default(cuid())
+  name          String
+  contactPerson String? @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  city          String?
+  country       String  @default("India")
+  paymentTerms  String? @map("payment_terms")
+  leadTimeDays  Int     @default(7) @map("lead_time_days")
+  isActive      Boolean @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+// ─── PRODUCTS ────────────────────────────────────────────────────────────────
+
+model Product {
+  id              String  @id @default(cuid())
+  sku             String  @unique
+  name            String
+  description     String?
+  categoryId      String? @map("category_id")
+  supplierId      String? @map("supplier_id")
+  unitOfMeasure   String  @default("unit") @map("unit_of_measure")
+  costPrice       Float   @default(0) @map("cost_price")
+  sellingPrice    Float   @default(0) @map("selling_price")
+  reorderPoint    Int     @default(0) @map("reorder_point")
+  reorderQuantity Int     @default(0) @map("reorder_quantity")
+  barcode         String?
+  qrCode          String? @map("qr_code")
+  batchTracking   Boolean @default(false) @map("batch_tracking")
+  expiryTracking  Boolean @default(false) @map("expiry_tracking")
+  imageUrl        String? @map("image_url")
+  isActive        Boolean @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  variants   ProductVariant[]
+  inventory  Inventory[]
+  movements  StockMovement[]
+  poItems    PurchaseOrderItem[]
+  soItems    SalesOrderItem[]
+  transferItems TransferItem[]
+  returnItems   ReturnItem[]
+
+  @@index([categoryId])
+  @@index([supplierId])
+  @@map("products")
+}
+
+// ─── PRODUCT VARIANTS ────────────────────────────────────────────────────────
+
+model ProductVariant {
+  id           String  @id @default(cuid())
+  productId    String  @map("product_id")
+  variantName  String  @map("variant_name")
+  skuSuffix    String  @map("sku_suffix")
+  attributes   String  @default("{}") // JSON stored as text for SQLite
+  costPrice    Float?  @map("cost_price")
+  sellingPrice Float?  @map("selling_price")
+  barcode      String?
+  isActive     Boolean @default(true) @map("is_active")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, skuSuffix])
+  @@map("product_variants")
+}
+
+// ─── INVENTORY ───────────────────────────────────────────────────────────────
+
+model Inventory {
+  id               String    @id @default(cuid())
+  productId        String    @map("product_id")
+  warehouseId      String    @map("warehouse_id")
+  quantity         Int       @default(0)
+  reservedQuantity Int       @default(0) @map("reserved_quantity")
+  batchNumber      String    @default("") @map("batch_number")
+  expiryDate       DateTime? @map("expiry_date")
+  lastCountedAt    DateTime? @map("last_counted_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId, batchNumber])
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([expiryDate])
+  @@map("inventory")
+}
+
+// ─── STOCK MOVEMENTS ─────────────────────────────────────────────────────────
+
+model StockMovement {
+  id            String   @id @default(cuid())
+  productId     String   @map("product_id")
+  warehouseId   String   @map("warehouse_id")
+  movementType  String   @map("movement_type") // purchase | sale | transfer_in | transfer_out | adjustment | return | damage
+  quantity      Int
+  referenceId   String?  @map("reference_id")
+  referenceType String?  @map("reference_type")
+  unitCost      Float?   @map("unit_cost")
+  totalCost     Float?   @map("total_cost")
+  notes         String?
+  createdBy     String?  @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  product   Product   @relation(fields: [productId], references: [id])
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
+  creator   User?     @relation("MovementCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt(sort: Desc)])
+  @@index([warehouseId, createdAt(sort: Desc)])
+  @@map("stock_movements")
+}
+
+// ─── PURCHASE ORDERS ─────────────────────────────────────────────────────────
+
+model PurchaseOrder {
+  id           String   @id @default(cuid())
+  poNumber     String   @unique @map("po_number")
+  supplierId   String   @map("supplier_id")
+  warehouseId  String   @map("warehouse_id")
+  status       String   @default("draft") // draft | sent | confirmed | received | cancelled
+  orderDate    DateTime @default(now()) @map("order_date")
+  expectedDate DateTime? @map("expected_date")
+  receivedDate DateTime? @map("received_date")
+  totalAmount  Float    @default(0) @map("total_amount")
+  notes        String?
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
+  creator   User?               @relation("POCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  items     PurchaseOrderItem[]
+
+  @@index([status, orderDate(sort: Desc)])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String @id @default(cuid())
+  poId             String @map("po_id")
+  productId        String @map("product_id")
+  quantityOrdered  Int    @map("quantity_ordered")
+  quantityReceived Int    @default(0) @map("quantity_received")
+  unitCost         Float  @map("unit_cost")
+
+  purchaseOrder PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+// ─── SALES ORDERS ────────────────────────────────────────────────────────────
+
+model SalesOrder {
+  id             String   @id @default(cuid())
+  soNumber       String   @unique @map("so_number")
+  customerName   String   @map("customer_name")
+  customerEmail  String?  @map("customer_email")
+  customerPhone  String?  @map("customer_phone")
+  warehouseId    String   @map("warehouse_id")
+  status         String   @default("draft") // draft | confirmed | shipped | delivered | cancelled
+  orderDate      DateTime @default(now()) @map("order_date")
+  shippedDate    DateTime? @map("shipped_date")
+  deliveredDate  DateTime? @map("delivered_date")
+  trackingNumber String?  @map("tracking_number")
+  carrierName    String?  @map("carrier_name")
+  totalAmount    Float    @default(0) @map("total_amount")
+  notes          String?
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  warehouse Warehouse        @relation(fields: [warehouseId], references: [id])
+  creator   User?            @relation("SOCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  items     SalesOrderItem[]
+
+  @@index([status, orderDate(sort: Desc)])
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id              String @id @default(cuid())
+  soId            String @map("so_id")
+  productId       String @map("product_id")
+  quantity        Int
+  unitPrice       Float  @map("unit_price")
+  discountPercent Float  @default(0) @map("discount_percent")
+
+  salesOrder SalesOrder @relation(fields: [soId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@map("sales_order_items")
+}
+
+// ─── TRANSFERS ───────────────────────────────────────────────────────────────
+
+model Transfer {
+  id              String   @id @default(cuid())
+  transferNumber  String   @unique @map("transfer_number")
+  fromWarehouseId String   @map("from_warehouse_id")
+  toWarehouseId   String   @map("to_warehouse_id")
+  status          String   @default("draft") // draft | in_transit | completed | cancelled
+  initiatedBy     String?  @map("initiated_by")
+  transferDate    DateTime @default(now()) @map("transfer_date")
+  completedDate   DateTime? @map("completed_date")
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  fromWarehouse Warehouse      @relation("TransferFrom", fields: [fromWarehouseId], references: [id])
+  toWarehouse   Warehouse      @relation("TransferTo", fields: [toWarehouseId], references: [id])
+  initiator     User?          @relation("TransferInitiator", fields: [initiatedBy], references: [id], onDelete: SetNull)
+  items         TransferItem[]
+
+  @@index([status, transferDate(sort: Desc)])
+  @@map("transfers")
+}
+
+model TransferItem {
+  id                  String @id @default(cuid())
+  transferId          String @map("transfer_id")
+  productId           String @map("product_id")
+  quantityRequested   Int    @map("quantity_requested")
+  quantityTransferred Int    @default(0) @map("quantity_transferred")
+
+  transfer Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@map("transfer_items")
+}
+
+// ─── RETURNS ─────────────────────────────────────────────────────────────────
+
+model Return {
+  id            String   @id @default(cuid())
+  returnNumber  String   @unique @map("return_number")
+  referenceType String   @map("reference_type") // sale | purchase
+  referenceId   String?  @map("reference_id")
+  warehouseId   String   @map("warehouse_id")
+  reason        String
+  status        String   @default("pending") // pending | approved | rejected | completed
+  totalItems    Int      @default(0) @map("total_items")
+  processedBy   String?  @map("processed_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  warehouse Warehouse    @relation(fields: [warehouseId], references: [id])
+  processor User?        @relation("ReturnProcessor", fields: [processedBy], references: [id], onDelete: SetNull)
+  items     ReturnItem[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id        String @id @default(cuid())
+  returnId  String @map("return_id")
+  productId String @map("product_id")
+  quantity  Int
+  condition String @default("good")  // good | damaged | expired
+  action    String @default("restock") // restock | discard | return_to_supplier
+
+  returnOrder Return  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id])
+
+  @@map("return_items")
+}
+
+// ─── AUDIT LOGS ──────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  oldValues  String?  @map("old_values") // JSON as text
+  newValues  String?  @map("new_values") // JSON as text
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  type       String
+  title      String
+  message    String
+  isRead     Boolean  @default(false) @map("is_read")
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+
+model Setting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String   @default("{}") // JSON as text
+  description String?
+  updatedBy   String?  @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  updater User? @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@map("settings")
+}

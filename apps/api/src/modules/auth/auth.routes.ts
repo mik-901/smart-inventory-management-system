@@ -1,172 +1,159 @@
 import { Router } from "express";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { jwtVerify, SignJWT } from "jose";
+import { SignJWT, jwtVerify } from "jose";
 
 import { env } from "../../config/env.js";
+import { prisma } from "../../db/prisma.js";
 import { authenticate } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
-import { query, queryOne } from "../../db/pool.js";
-import { asyncHandler, created, ok } from "../../utils/http.js";
+import type { AuthRequest } from "../../types/index.js";
+import { asyncHandler, ok } from "../../utils/http.js";
+import { normalizeRole } from "../../utils/serializers.js";
 import { loginSchema, registerSchema } from "../../validators/schemas.js";
-import type { AuthRequest, Role } from "../../types/index.js";
+
+export const authRouter = Router();
 
 const scryptAsync = promisify(scrypt);
-const ACCESS_SECRET = new TextEncoder().encode(env.JWT_SECRET);
-const REFRESH_SECRET = new TextEncoder().encode(env.JWT_REFRESH_SECRET);
+const accessSecret = new TextEncoder().encode(env.JWT_SECRET);
+const refreshSecret = new TextEncoder().encode(env.JWT_REFRESH_SECRET);
 
-type DbUser = {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  password_hash: string;
-  is_active: boolean;
-};
-
-async function hashPassword(password: string): Promise<string> {
+async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const derived = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${salt}:${derived.toString("hex")}`;
 }
 
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [salt, key] = hash.split(":");
-  if (!salt || !key) return false;
-  const derived = (await scryptAsync(password, salt, 64)) as Buffer;
-  const keyBuffer = Buffer.from(key, "hex");
-  if (keyBuffer.length !== derived.length) return false;
-  return timingSafeEqual(keyBuffer, derived);
+async function verifyPassword(stored: string, supplied: string) {
+  const [salt, hash] = stored.split(":");
+  const derived = (await scryptAsync(supplied, salt, 64)) as Buffer;
+  return timingSafeEqual(Buffer.from(hash, "hex"), derived);
 }
 
-async function createTokens(user: Pick<DbUser, "id" | "email" | "role" | "name">) {
-  const accessToken = await new SignJWT({
-    email: user.email,
-    role: user.role,
-    name: user.name
-  })
+async function signTokens(payload: { id: string; email: string; name: string; role: string }) {
+  const accessToken = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
-    .setSubject(user.id)
-    .setIssuedAt()
     .setExpirationTime(env.JWT_EXPIRES_IN)
     .setAudience(env.JWT_AUDIENCE)
     .setIssuer(env.JWT_ISSUER ?? "smart-inventory-api")
-    .sign(ACCESS_SECRET);
+    .sign(accessSecret);
 
-  const refreshToken = await new SignJWT({ type: "refresh" })
+  const refreshToken = await new SignJWT({ id: payload.id })
     .setProtectedHeader({ alg: "HS256" })
-    .setSubject(user.id)
-    .setIssuedAt()
     .setExpirationTime(env.JWT_REFRESH_EXPIRES_IN)
     .setAudience(env.JWT_AUDIENCE)
     .setIssuer(env.JWT_ISSUER ?? "smart-inventory-api")
-    .sign(REFRESH_SECRET);
+    .sign(refreshSecret);
 
   return { accessToken, refreshToken };
 }
 
-function publicUser(user: Pick<DbUser, "id" | "name" | "email" | "role">) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
-}
-
-export const authRouter = Router();
-
-authRouter.post(
-  "/register",
-  validateBody(registerSchema),
-  asyncHandler(async (req, res) => {
-    const { name, email, password } = req.body as { name: string; email: string; password: string };
-    const passwordHash = await hashPassword(password);
-
-    const existing = await queryOne("select id from users where lower(email) = lower($1)", [email]);
-    if (existing) {
-      return res.status(409).json({ success: false, message: "An account with this email already exists" });
-    }
-
-    const user = await queryOne<DbUser>(
-      `insert into users (name, email, password_hash, role)
-       values ($1, lower($2), $3, 'viewer')
-       returning id, name, email, role, password_hash, is_active`,
-      [name, email, passwordHash]
-    );
-
-    if (!user) throw new Error("Unable to create user");
-    const tokens = await createTokens(user);
-    return created(res, { user: publicUser(user), ...tokens }, "Registration successful");
-  })
-);
-
+// ── POST /auth/login ─────────────────────────────────────────────────────────
 authRouter.post(
   "/login",
   validateBody(loginSchema),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body as { email: string; password: string };
-    const user = await queryOne<DbUser>(
-      "select id, name, email, role, password_hash, is_active from users where lower(email) = lower($1)",
-      [email]
-    );
+    const { email, password } = req.body;
 
-    if (!user || !user.is_active || !(await verifyPassword(password, user.password_hash))) {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.isActive) {
       return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
 
-    await query("update users set last_login_at = now() where id = $1", [user.id]);
-    const tokens = await createTokens(user);
-    return ok(res, { user: publicUser(user), ...tokens }, "Login successful");
+    const valid = await verifyPassword(user.passwordHash, password);
+    if (!valid) {
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
+    }
+
+    const role = normalizeRole(user.role);
+    const tokens = await signTokens({ id: user.id, email: user.email, name: user.name, role });
+
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+
+    return ok(res, {
+      user: { id: user.id, email: user.email, name: user.name, role },
+      ...tokens
+    });
   })
 );
 
-authRouter.post("/logout", (_req, res) => {
-  return ok(res, { loggedOut: true }, "Logout successful");
-});
+// ── POST /auth/register ──────────────────────────────────────────────────────
+authRouter.post(
+  "/register",
+  validateBody(registerSchema),
+  asyncHandler(async (req, res) => {
+    const { name, email, password } = req.body;
 
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ success: false, message: "Email already registered" });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const user = await prisma.user.create({
+      data: { name, email, passwordHash, role: "viewer" }
+    });
+
+    const role = normalizeRole(user.role);
+    const tokens = await signTokens({ id: user.id, email: user.email, name: user.name, role });
+
+    return res.status(201).json({
+      success: true,
+      message: "Account created",
+      data: {
+        user: { id: user.id, email: user.email, name: user.name, role },
+        ...tokens
+      }
+    });
+  })
+);
+
+// ── POST /auth/refresh ───────────────────────────────────────────────────────
 authRouter.post(
   "/refresh",
   asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body as { refreshToken?: string };
-    if (!refreshToken) {
-      return res.status(400).json({ success: false, message: "Refresh token is required" });
-    }
+    const token = String(req.body.refreshToken ?? "");
+    if (!token) return res.status(400).json({ success: false, message: "Refresh token required" });
 
     try {
-      const { payload } = await jwtVerify(refreshToken, REFRESH_SECRET, {
-        audience: env.JWT_AUDIENCE,
-        issuer: env.JWT_ISSUER ?? "smart-inventory-api"
-      });
+      const { payload } = await jwtVerify(token, refreshSecret, { audience: env.JWT_AUDIENCE });
+      const userId = payload.id as string;
 
-      if (payload.type !== "refresh") {
-        return res.status(401).json({ success: false, message: "Invalid token type" });
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user || !user.isActive) {
+        return res.status(401).json({ success: false, message: "User not found or inactive" });
       }
 
-      const user = await queryOne<DbUser>(
-        "select id, name, email, role, password_hash, is_active from users where id = $1 and is_active = true",
-        [payload.sub]
-      );
-      if (!user) return res.status(401).json({ success: false, message: "User not found" });
+      const role = normalizeRole(user.role);
+      const tokens = await signTokens({ id: user.id, email: user.email, name: user.name, role });
 
-      const tokens = await createTokens(user);
-      return ok(res, { user: publicUser(user), ...tokens }, "Token refreshed");
+      return ok(res, { user: { id: user.id, email: user.email, name: user.name, role }, ...tokens });
     } catch {
       return res.status(401).json({ success: false, message: "Invalid or expired refresh token" });
     }
   })
 );
 
+// ── GET /auth/me ─────────────────────────────────────────────────────────────
 authRouter.get(
   "/me",
   authenticate,
   asyncHandler<AuthRequest>(async (req, res) => {
-    const user = await queryOne<
-      Pick<DbUser, "id" | "name" | "email" | "role"> & {
-        last_login_at: Date | null;
-        created_at: Date;
-      }
-    >(
-      "select id, name, email, role, last_login_at, created_at from users where id = $1 and is_active = true",
-      [req.user?.id]
-    );
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user || !user.isActive) {
+      return res.status(401).json({ success: false, message: "User not found" });
+    }
 
-    if (!user) return res.status(401).json({ success: false, message: "User not found" });
-    return ok(res, { ...publicUser(user), lastLogin: user.last_login_at, createdAt: user.created_at });
+    return ok(res, {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: normalizeRole(user.role)
+    });
   })
 );
+
+// ── POST /auth/logout ────────────────────────────────────────────────────────
+authRouter.post("/logout", (_req, res) => {
+  return ok(res, null, "Logged out");
+});

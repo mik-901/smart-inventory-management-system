@@ -1,51 +1,74 @@
 import { Router } from "express";
 
-import { query } from "../../db/pool.js";
-import { requirePermission } from "../../middleware/rbac.js";
+import { prisma } from "../../db/prisma.js";
+import { authenticate } from "../../middleware/auth.js";
 import type { AuthRequest } from "../../types/index.js";
-import { asyncHandler, ok } from "../../utils/http.js";
+import { asyncHandler, noContent, ok, paginated } from "../../utils/http.js";
+import { parseListQuery } from "../../utils/pagination.js";
 
 export const notificationsRouter = Router();
 
-function mapNotification(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    type: row.type,
-    title: row.title,
-    message: row.message,
-    isRead: row.is_read,
-    read: row.is_read,
-    entityType: row.entity_type,
-    entityId: row.entity_id,
-    createdAt: row.created_at,
-    time: row.created_at
-  };
-}
+notificationsRouter.use(authenticate);
 
 notificationsRouter.get(
   "/",
-  requirePermission("dashboard:read"),
   asyncHandler<AuthRequest>(async (req, res) => {
-    const rows = await query("select * from notifications where user_id = $1 order by created_at desc limit 100", [req.user?.id]);
-    return ok(res, rows.map(mapNotification));
+    const list = parseListQuery(req, "created_at");
+    const where: any = { userId: req.user!.id };
+    if (req.query.unreadOnly === "true") where.isRead = false;
+
+    const [total, notifications] = await Promise.all([
+      prisma.notification.count({ where }),
+      prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: list.limit,
+        skip: list.offset
+      })
+    ]);
+
+    return paginated(res, notifications, { page: list.page, limit: list.limit, total });
   })
 );
 
-notificationsRouter.patch(
+notificationsRouter.get(
+  "/unread-count",
+  asyncHandler<AuthRequest>(async (req, res) => {
+    const count = await prisma.notification.count({
+      where: { userId: req.user!.id, isRead: false }
+    });
+    return ok(res, { count });
+  })
+);
+
+notificationsRouter.post(
   "/:id/read",
-  requirePermission("dashboard:read"),
   asyncHandler<AuthRequest>(async (req, res) => {
-    const rows = await query("update notifications set is_read = true where id = $1 and user_id = $2 returning *", [req.params.id, req.user?.id]);
-    if (!rows[0]) return res.status(404).json({ success: false, message: "Notification not found" });
-    return ok(res, mapNotification(rows[0]), "Notification marked read");
+    await prisma.notification.updateMany({
+      where: { id: String(req.params.id), userId: req.user!.id },
+      data: { isRead: true }
+    });
+    return noContent(res);
   })
 );
 
-notificationsRouter.patch(
+notificationsRouter.post(
   "/read-all",
-  requirePermission("dashboard:read"),
   asyncHandler<AuthRequest>(async (req, res) => {
-    await query("update notifications set is_read = true where user_id = $1", [req.user?.id]);
-    return ok(res, { readAll: true }, "Notifications marked read");
+    await prisma.notification.updateMany({
+      where: { userId: req.user!.id, isRead: false },
+      data: { isRead: true }
+    });
+    return noContent(res);
+  })
+);
+
+notificationsRouter.delete(
+  "/:id",
+  asyncHandler<AuthRequest>(async (req, res) => {
+    await prisma.notification.deleteMany({
+      where: { id: String(req.params.id), userId: req.user!.id }
+    });
+    return noContent(res);
   })
 );
