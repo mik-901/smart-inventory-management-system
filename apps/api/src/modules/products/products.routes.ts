@@ -83,6 +83,127 @@ function mapProduct(p: any) {
 
 // ── GET /products ────────────────────────────────────────────────────────────
 
+// ── GET /products/barcode/:code — Lookup by barcode (local catalog + external APIs) ──
+
+productsRouter.get(
+  "/barcode/:code",
+  requirePermission("products:read"),
+  asyncHandler(async (req, res) => {
+    const code = String(req.params.code).trim();
+
+    // 1. Check if product already exists in our inventory
+    const existing = await prisma.product.findFirst({
+      where: { barcode: code, isActive: true },
+      include: { category: true, supplier: true, variants: true }
+    });
+    if (existing) {
+      return ok(res, {
+        found: true,
+        source: "inventory",
+        product: mapProduct(existing)
+      });
+    }
+
+    // 2. Check local barcode catalog (pre-seeded real products)
+    const catalogEntry = await prisma.barcodeProduct.findUnique({
+      where: { barcode: code }
+    });
+    if (catalogEntry) {
+      return ok(res, {
+        found: true,
+        source: "catalog",
+        product: {
+          name: catalogEntry.name,
+          brand: catalogEntry.brand ?? "",
+          category: catalogEntry.category ?? "Electronics",
+          description: catalogEntry.description ?? "",
+          barcode: catalogEntry.barcode,
+          imageUrl: catalogEntry.imageUrl ?? null,
+          costPrice: catalogEntry.costPrice ?? 0,
+          sellingPrice: catalogEntry.sellingPrice ?? 0,
+          unitOfMeasure: catalogEntry.unitOfMeasure
+        }
+      });
+    }
+
+    // 3. Try Open Food Facts (great for FMCG, food, beverages — unlimited & free)
+    try {
+      const offUrl = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`;
+      const offRes = await fetch(offUrl, {
+        signal: AbortSignal.timeout(4000),
+        headers: { "User-Agent": "SmartInventory/1.0 (local-dev)" }
+      });
+      if (offRes.ok) {
+        const offData = await offRes.json() as any;
+        if (offData.status === 1 && offData.product) {
+          const p = offData.product;
+          return ok(res, {
+            found: true,
+            source: "openfoodfacts",
+            product: {
+              name: p.product_name ?? p.product_name_en ?? "Unknown Product",
+              brand: p.brands ?? "",
+              category: p.categories_tags?.[0]?.replace("en:", "").replace(/-/g, " ") ?? "Food & Beverages",
+              description: p.generic_name ?? p.ingredients_text ?? "",
+              barcode: code,
+              imageUrl: p.image_url ?? p.image_front_url ?? null,
+              costPrice: 0,
+              sellingPrice: 0,
+              unitOfMeasure: p.quantity ? "piece" : "piece"
+            }
+          });
+        }
+      }
+    } catch {
+      // timeout or network error — continue to next fallback
+    }
+
+    // 4. Try UPC Item DB (electronics, general goods — 100 lookups/day free)
+    try {
+      const upcUrl = `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`;
+      const upcRes = await fetch(upcUrl, {
+        signal: AbortSignal.timeout(4000),
+        headers: { "User-Agent": "SmartInventory/1.0" }
+      });
+      if (upcRes.ok) {
+        const upcData = await upcRes.json() as any;
+        const item = upcData.items?.[0];
+        if (item) {
+          return ok(res, {
+            found: true,
+            source: "upcitemdb",
+            product: {
+              name: item.title ?? "Unknown Product",
+              brand: item.brand ?? "",
+              category: item.category ?? "Electronics",
+              description: item.description ?? "",
+              barcode: code,
+              imageUrl: item.images?.[0] ?? null,
+              costPrice: 0,
+              sellingPrice: item.lowest_recorded_price
+                ? Math.round(item.lowest_recorded_price * 83)
+                : 0,
+              unitOfMeasure: "piece"
+            }
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 5. Nothing found anywhere
+    return ok(res, {
+      found: false,
+      source: null,
+      product: null,
+      message: "Barcode not found in any database. Please fill product details manually."
+    });
+  })
+);
+
+
+
 productsRouter.get(
   "/",
   requirePermission("products:read"),

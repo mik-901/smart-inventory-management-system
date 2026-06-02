@@ -420,3 +420,25 @@ model Setting {
 
   @@map("settings")
 }
+
+// ─── BARCODE CATALOG ─────────────────────────────────────────────────────────
+// Pre-seeded real-world products. Looked up on barcode scan to auto-fill forms.
+
+model BarcodeProduct {
+  id            String   @id @default(cuid())
+  barcode       String   @unique
+  name          String
+  brand         String?
+  category      String?
+  description   String?
+  imageUrl      String?  @map("image_url")
+  costPrice     Float?   @map("cost_price")
+  sellingPrice  Float?   @map("selling_price")
+  unitOfMeasure String   @default("piece") @map("unit_of_measure")
+  source        String   @default("local") // local | openfoodfacts | upcitemdb
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([barcode])
+  @@map("barcode_catalog")
+}
+

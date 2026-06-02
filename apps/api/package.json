@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx prisma db seed",
+    "db:catalog": "npx tsx prisma/catalog-seed.ts",
     "db:reset": "npx prisma migrate reset",
     "db:studio": "npx prisma studio"
   },

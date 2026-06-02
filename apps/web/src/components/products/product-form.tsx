@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { ImagePlus, Plus } from "lucide-react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
+import { CheckCircle, ImagePlus, Loader2, Plus, ScanLine, XCircle } from "lucide-react";
+import { toast } from "sonner";
 
 import { BarcodeScanner } from "@/components/scanner/barcode-scanner";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { getAccessToken } from "@/lib/auth-context";
 import { generateSku } from "@/lib/utils";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type ProductDraft = {
   name: string;
@@ -25,6 +29,7 @@ type ProductDraft = {
   reorderLevel: string;
   supplier: string;
   imageUrl: string;
+  description: string;
 };
 
 const initialDraft: ProductDraft = {
@@ -40,11 +45,24 @@ const initialDraft: ProductDraft = {
   expiryDate: "",
   reorderLevel: "25",
   supplier: "",
-  imageUrl: ""
+  imageUrl: "",
+  description: ""
+};
+
+type LookupState = "idle" | "loading" | "found" | "not_found";
+
+const SOURCE_LABELS: Record<string, string> = {
+  inventory: "Already in your inventory",
+  catalog: "Matched in local catalog",
+  openfoodfacts: "Found via Open Food Facts",
+  upcitemdb: "Found via UPC Item DB"
 };
 
 export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => void }) {
   const [draft, setDraft] = useState(initialDraft);
+  const [lookupState, setLookupState] = useState<LookupState>("idle");
+  const [lookupSource, setLookupSource] = useState<string | null>(null);
+
   const generatedSku = useMemo(() => generateSku(draft.name || "Product", Date.now() % 9999), [draft.name]);
 
   const update = (key: keyof ProductDraft, value: string) => {
@@ -55,20 +73,94 @@ export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => v
     event.preventDefault();
     onCreate({ ...draft, sku: draft.sku || generatedSku });
     setDraft(initialDraft);
+    setLookupState("idle");
+    setLookupSource(null);
   };
+
+  const handleScan = useCallback(async (scannedCode: string) => {
+    update("barcode", scannedCode);
+    setLookupState("loading");
+    setLookupSource(null);
+
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_URL}/products/barcode/${encodeURIComponent(scannedCode)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.ok) throw new Error("Lookup failed");
+      const body = await res.json();
+
+      if (body.data?.found && body.data.product) {
+        const p = body.data.product;
+        setDraft((current) => ({
+          ...current,
+          barcode: scannedCode,
+          name: p.name || current.name,
+          brand: p.brand || current.brand,
+          category: p.category || current.category,
+          price: p.sellingPrice ? String(p.sellingPrice) : current.price,
+          costPrice: p.costPrice ? String(p.costPrice) : current.costPrice,
+          imageUrl: p.imageUrl || current.imageUrl,
+          description: p.description || current.description,
+          supplier: p.supplier || p.brand || current.supplier
+        }));
+        setLookupState("found");
+        setLookupSource(body.data.source ?? null);
+        toast.success(`✅ Found: ${p.name}`, {
+          description: SOURCE_LABELS[body.data.source] ?? body.data.source
+        });
+      } else {
+        setLookupState("not_found");
+        toast.warning("⚠️ Barcode not in any database", {
+          description: "Please fill in the product details manually."
+        });
+      }
+    } catch {
+      setLookupState("not_found");
+      toast.error("Barcode lookup failed — fill manually");
+    }
+  }, []);
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Add Product / SKU</CardTitle>
-        <CardDescription>Create sellable SKUs with batch, variants, supplier, barcode, and reorder settings.</CardDescription>
+        <CardDescription>
+          Scan a real product barcode to auto-fill details from our 200+ product catalog, Open Food Facts, and UPC databases.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-4" onSubmit={submit}>
+
+          {/* Lookup status banner */}
+          {lookupState === "loading" && (
+            <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+              <Loader2 className="size-4 animate-spin" />
+              Looking up barcode in catalog and external databases…
+            </div>
+          )}
+          {lookupState === "found" && (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300">
+              <CheckCircle className="size-4" />
+              <span>
+                <strong>Product auto-filled</strong>
+                {lookupSource && ` · ${SOURCE_LABELS[lookupSource] ?? lookupSource}`}
+                {" — review and adjust before saving."}
+              </span>
+            </div>
+          )}
+          {lookupState === "not_found" && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              <XCircle className="size-4" />
+              Barcode not found — fill in the details below manually.
+            </div>
+          )}
+
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="name">Product name</Label>
-              <Input id="name" required value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="NovaScan Wireless Scanner" />
+              <Input id="name" required value={draft.name} onChange={(event) => update("name", event.target.value)} placeholder="Parle-G Original Gluco Biscuits 800g" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="sku">SKU</Label>
@@ -81,9 +173,13 @@ export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => v
               <Label htmlFor="category">Category</Label>
               <Select id="category" value={draft.category} onChange={(event) => update("category", event.target.value)}>
                 <option>Electronics</option>
-                <option>Hardware</option>
-                <option>IoT</option>
+                <option>Food &amp; Beverages</option>
+                <option>Personal Care</option>
+                <option>Office Supplies</option>
+                <option>Household</option>
+                <option>Health</option>
                 <option>Packaging</option>
+                <option>Clothing</option>
                 <option>Consumables</option>
               </Select>
             </div>
@@ -92,7 +188,7 @@ export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => v
               <Input id="brand" value={draft.brand} onChange={(event) => update("brand", event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="price">Price</Label>
+              <Label htmlFor="price">Selling price</Label>
               <Input id="price" type="number" value={draft.price} onChange={(event) => update("price", event.target.value)} />
             </div>
             <div className="space-y-2">
@@ -104,7 +200,7 @@ export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => v
           <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="barcode">Barcode / QR payload</Label>
-              <Input id="barcode" value={draft.barcode} onChange={(event) => update("barcode", event.target.value)} />
+              <Input id="barcode" value={draft.barcode} onChange={(event) => update("barcode", event.target.value)} placeholder="Scan or type EAN-13" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="variants">Variants</Label>
@@ -126,7 +222,7 @@ export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => v
               <Input id="reorder" type="number" value={draft.reorderLevel} onChange={(event) => update("reorderLevel", event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="supplier">Supplier details</Label>
+              <Label htmlFor="supplier">Supplier</Label>
               <Input id="supplier" value={draft.supplier} onChange={(event) => update("supplier", event.target.value)} />
             </div>
             <div className="space-y-2">
@@ -138,12 +234,20 @@ export function ProductForm({ onCreate }: { onCreate: (draft: ProductDraft) => v
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+          <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
             <Button type="submit">
               <Plus />
               Save Product
             </Button>
-            <BarcodeScanner onScan={(value) => update("barcode", value)} />
+
+            {/* Scanner with lookup badge */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <ScanLine className="size-4" />
+                Scan to auto-fill from 200+ product catalog
+              </div>
+              <BarcodeScanner onScan={handleScan} />
+            </div>
           </div>
         </form>
       </CardContent>
