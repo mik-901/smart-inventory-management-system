@@ -152,7 +152,7 @@ export default function ProductsPage() {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Image
-                          src={product.imageUrl}
+                          src={product.imageUrl || "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800"}
                           alt={product.name}
                           width={44}
                           height={44}

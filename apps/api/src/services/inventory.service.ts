@@ -1,5 +1,7 @@
-import type { PoolClient } from "pg";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import type { Server } from "socket.io";
+
+type TxClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
 type AdjustmentInput = {
   productId: string;
@@ -16,98 +18,137 @@ type AdjustmentInput = {
   io?: Server;
 };
 
-export async function adjustInventory(client: PoolClient, input: AdjustmentInput) {
+export async function adjustInventory(tx: TxClient, input: AdjustmentInput) {
   const quantityDelta = input.quantityDelta ?? 0;
   const reservedDelta = input.reservedDelta ?? 0;
 
-  await client.query(
-    `insert into inventory (product_id, warehouse_id, quantity, reserved_quantity, batch_number)
-     values ($1, $2, 0, 0, '')
-     on conflict (product_id, warehouse_id, batch_number) do nothing`,
-    [input.productId, input.warehouseId]
-  );
+  // Upsert the inventory record (ensure it exists)
+  await tx.inventory.upsert({
+    where: {
+      productId_warehouseId_batchNumber: {
+        productId: input.productId,
+        warehouseId: input.warehouseId,
+        batchNumber: ""
+      }
+    },
+    create: {
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      quantity: 0,
+      reservedQuantity: 0,
+      batchNumber: ""
+    },
+    update: {
+      updatedAt: new Date()
+    }
+  });
 
-  const updated = await client.query(
-    `update inventory
-       set quantity = quantity + $3,
-           reserved_quantity = reserved_quantity + $4,
-           updated_at = now()
-     where product_id = $1
-       and warehouse_id = $2
-       and batch_number = ''
-       and quantity + $3 >= 0
-       and reserved_quantity + $4 >= 0
-       and reserved_quantity + $4 <= quantity + $3
-     returning id, product_id, warehouse_id, quantity, reserved_quantity, available_quantity`,
-    [input.productId, input.warehouseId, quantityDelta, reservedDelta]
-  );
+  // Fetch current state for validation
+  const current = await tx.inventory.findUnique({
+    where: {
+      productId_warehouseId_batchNumber: {
+        productId: input.productId,
+        warehouseId: input.warehouseId,
+        batchNumber: ""
+      }
+    }
+  });
 
-  if (updated.rowCount !== 1) {
-    throw new Error("Insufficient available stock for this operation");
-  }
+  if (!current) throw new Error("Inventory record not found after upsert");
 
+  const newQuantity = current.quantity + quantityDelta;
+  const newReserved = current.reservedQuantity + reservedDelta;
+  const newAvailable = newQuantity - newReserved;
+
+  if (newQuantity < 0) throw new Error("Insufficient stock for this operation");
+  if (newReserved < 0) throw new Error("Reserved quantity cannot be negative");
+  if (newReserved > newQuantity) throw new Error("Reserved quantity exceeds total stock");
+
+  const updated = await tx.inventory.update({
+    where: { id: current.id },
+    data: {
+      quantity: newQuantity,
+      reservedQuantity: newReserved
+    }
+  });
+
+  // Record stock movement
   if (input.movementType && input.movementQuantity && input.movementQuantity > 0) {
-    await client.query(
-      `insert into stock_movements (
-         product_id, warehouse_id, movement_type, quantity, reference_id, reference_type,
-         unit_cost, total_cost, notes, created_by
-       )
-       values ($1, $2, $3, $4, $5, $6, $7, case when $7::numeric is null then null else $4 * $7::numeric end, $8, $9)`,
-      [
-        input.productId,
-        input.warehouseId,
-        input.movementType,
-        input.movementQuantity,
-        input.referenceId ?? null,
-        input.referenceType ?? null,
-        input.unitCost ?? null,
-        input.notes ?? null,
-        input.userId ?? null
-      ]
-    );
+    await tx.stockMovement.create({
+      data: {
+        productId: input.productId,
+        warehouseId: input.warehouseId,
+        movementType: input.movementType,
+        quantity: input.movementQuantity,
+        referenceId: input.referenceId ?? null,
+        referenceType: input.referenceType ?? null,
+        unitCost: input.unitCost ?? null,
+        totalCost: input.unitCost != null ? input.movementQuantity * input.unitCost : null,
+        notes: input.notes ?? null,
+        createdBy: input.userId ?? null
+      }
+    });
   }
 
-  await checkLowStock(client, input.productId, input.io);
-  input.io?.emit("inventory:updated", updated.rows[0]);
-  return updated.rows[0];
+  // Check low stock
+  await checkLowStock(tx, input.productId, input.io);
+
+  const result = {
+    id: updated.id,
+    product_id: updated.productId,
+    warehouse_id: updated.warehouseId,
+    quantity: updated.quantity,
+    reserved_quantity: updated.reservedQuantity,
+    available_quantity: updated.quantity - updated.reservedQuantity
+  };
+
+  input.io?.emit("inventory:updated", result);
+  return result;
 }
 
-export async function checkLowStock(client: PoolClient, productId: string, io?: Server) {
-  const result = await client.query(
-    `select
-       p.id,
-       p.name,
-       p.sku,
-       p.reorder_point,
-       coalesce(sum(i.available_quantity), 0)::int as available_quantity
-     from products p
-     left join inventory i on i.product_id = p.id
-     where p.id = $1 and p.is_active = true
-     group by p.id`,
-    [productId]
-  );
+export async function checkLowStock(tx: TxClient, productId: string, io?: Server) {
+  const product = await tx.product.findUnique({
+    where: { id: productId, isActive: true },
+    select: { id: true, name: true, sku: true, reorderPoint: true }
+  });
 
-  const product = result.rows[0];
-  if (!product || Number(product.available_quantity) > Number(product.reorder_point)) return;
+  if (!product) return;
 
-  const users = await client.query("select id from users where role in ('admin', 'manager') and is_active = true");
-  for (const user of users.rows) {
-    await client.query(
-      `insert into notifications (user_id, type, title, message, entity_type, entity_id)
-       values ($1, 'low_stock', 'Low stock warning', $2, 'products', $3)`,
-      [
-        user.id,
-        `${product.name} (${product.sku}) is below reorder point. Available: ${product.available_quantity}, reorder point: ${product.reorder_point}.`,
-        product.id
-      ]
-    );
+  const inventoryAgg = await tx.inventory.aggregate({
+    where: { productId },
+    _sum: { quantity: true, reservedQuantity: true }
+  });
+
+  const totalQty = inventoryAgg._sum.quantity ?? 0;
+  const totalReserved = inventoryAgg._sum.reservedQuantity ?? 0;
+  const available = totalQty - totalReserved;
+
+  if (available > product.reorderPoint) return;
+
+  // Create notifications for admin/manager users
+  const users = await tx.user.findMany({
+    where: { role: { in: ["admin", "manager"] }, isActive: true },
+    select: { id: true }
+  });
+
+  for (const user of users) {
+    await tx.notification.create({
+      data: {
+        userId: user.id,
+        type: "low_stock",
+        title: "Low stock warning",
+        message: `${product.name} (${product.sku}) is below reorder point. Available: ${available}, reorder point: ${product.reorderPoint}.`,
+        entityType: "products",
+        entityId: product.id
+      }
+    });
   }
 
   io?.emit("notification:low_stock", {
     productId: product.id,
     sku: product.sku,
     name: product.name,
-    availableQuantity: Number(product.available_quantity),
-    reorderPoint: Number(product.reorder_point)
+    availableQuantity: available,
+    reorderPoint: product.reorderPoint
   });
 }

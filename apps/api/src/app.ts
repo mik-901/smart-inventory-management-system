@@ -4,7 +4,6 @@ import helmet from "helmet";
 import morgan from "morgan";
 
 import { env } from "./config/env.js";
-import { pool } from "./db/pool.js";
 import { auditMutations } from "./middleware/audit.js";
 import { authenticate } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error.js";
@@ -67,7 +66,7 @@ export function createApp() {
       success: true,
       status: "ok",
       service: "smart-inventory-api",
-      database: pool ? "configured" : "missing DATABASE_URL",
+      database: "configured",
       timestamp: new Date().toISOString()
     });
   });

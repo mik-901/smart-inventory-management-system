@@ -5,12 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "npx prisma generate && tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "npx prisma migrate dev",
+    "db:seed": "npx prisma db seed",
+    "db:reset": "npx prisma migrate reset",
+    "db:studio": "npx prisma studio"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@clerk/backend": "latest",
+    "@prisma/client": "^6.19.3",
     "cors": "latest",
     "csv-stringify": "latest",
     "dotenv": "latest",
@@ -21,7 +28,6 @@
     "morgan": "latest",
     "multer": "latest",
     "pdfkit": "latest",
-    "pg": "latest",
     "socket.io": "latest",
     "zod": "latest"
   },
@@ -32,7 +38,7 @@
     "@types/multer": "latest",
     "@types/node": "latest",
     "@types/pdfkit": "latest",
-    "@types/pg": "latest",
+    "prisma": "^6.19.3",
     "tsx": "latest",
     "typescript": "latest"
   }

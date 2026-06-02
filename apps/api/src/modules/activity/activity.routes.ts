@@ -1,32 +1,46 @@
 import { Router } from "express";
 
-import { query } from "../../db/pool.js";
+import { prisma } from "../../db/prisma.js";
 import { requirePermission } from "../../middleware/rbac.js";
-import { asyncHandler, ok } from "../../utils/http.js";
+import { asyncHandler, paginated } from "../../utils/http.js";
+import { parseListQuery } from "../../utils/pagination.js";
 
 export const activityRouter = Router();
 
 activityRouter.get(
   "/",
-  requirePermission("dashboard:read"),
-  asyncHandler(async (_req, res) => {
-    const rows = await query(
-      `select a.id, coalesce(u.name, 'System') as actor, a.action, a.entity_type, a.entity_id, a.created_at
-         from audit_logs a
-         left join users u on u.id = a.user_id
-        order by a.created_at desc
-        limit 50`
-    );
-    return ok(
+  requirePermission("audit:read"),
+  asyncHandler(async (req, res) => {
+    const list = parseListQuery(req, "created_at");
+    const where: any = {};
+    if (req.query.entityType) where.entityType = String(req.query.entityType);
+    if (req.query.entityId) where.entityId = String(req.query.entityId);
+    if (req.query.userId) where.userId = String(req.query.userId);
+
+    const [total, logs] = await Promise.all([
+      prisma.auditLog.count({ where }),
+      prisma.auditLog.findMany({
+        where,
+        include: { user: { select: { name: true, email: true } } },
+        orderBy: { createdAt: "desc" },
+        take: list.limit,
+        skip: list.offset
+      })
+    ]);
+
+    return paginated(
       res,
-      rows.map((row) => ({
-        id: row.id,
-        actor: row.actor,
-        action: row.action,
-        entity: row.entity_id ?? row.entity_type,
-        time: row.created_at,
-        tone: String(row.action).includes("delete") ? "danger" : String(row.action).includes("update") ? "warning" : "success"
-      }))
+      logs.map((log) => ({
+        id: log.id,
+        action: log.action,
+        entityType: log.entityType,
+        entityId: log.entityId,
+        userName: log.user?.name ?? "System",
+        userEmail: log.user?.email ?? "",
+        createdAt: log.createdAt,
+        details: log.newValues ? JSON.parse(log.newValues) : null
+      })),
+      { page: list.page, limit: list.limit, total }
     );
   })
 );
